@@ -3,8 +3,8 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const transporter = require("../config/mailer");
-const sendTeacherEmail = require("../config/mailer")
-
+const sendTeacherEmail = require("../config/mailer");
+const sendOTPEmail = require("../config/mailer");
 // ADMIN CREATE TEACHER
 exports.createTeacher = async (req, res) => {
 
@@ -12,36 +12,40 @@ exports.createTeacher = async (req, res) => {
 
     const { first_name, last_name, email, mobile_number } = req.body;
 
-    const password = crypto.randomBytes(4).toString("hex");
+    console.log("Incoming data:", req.body);
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const tempPassword = crypto.randomBytes(4).toString("hex");
+
+    const hashedPassword = await bcrypt.hash(tempPassword, 10);
+
+    console.log("Generated password:", tempPassword);
 
     const teacher = await pool.query(
-      `INSERT INTO teachers 
-      (first_name,last_name,email,mobile_number,password)
-      VALUES ($1,$2,$3,$4,$5)
-      RETURNING *`,
+      `INSERT INTO teachers
+       (first_name,last_name,email,mobile_number,password)
+       VALUES ($1,$2,$3,$4,$5)
+       RETURNING *`,
       [first_name,last_name,email,mobile_number,hashedPassword]
     );
 
-    await sendTeacherEmail(email, first_name, password);
+     await sendTeacherEmail(email, first_name, tempPassword);
+
     res.json({
       success: true,
-      message: "Teacher created and email sent"
+      message: "Teacher created and email sent",
     });
 
   } catch (error) {
 
-    console.error(error);
+    console.error("Insert error:", error);
 
-    res.status(500).json({ error: "Teacher creation failed" });
+    res.status(500).json({
+      error: "Teacher creation failed"
+    });
 
   }
 
 };
-
-
-
 // TEACHER LOGIN
 exports.teacherLogin = async (req,res)=>{
 
@@ -58,11 +62,15 @@ exports.teacherLogin = async (req,res)=>{
       return res.status(404).json({error:"Teacher not found"});
 
     const user = teacher.rows[0];
+    // Compare plain password with hashed password
+    console.log(user.password);
+    console.log("Entered password:", password);
+    const isPasswordValid = await bcrypt.compare(password, user.password);
 
-    const match = await bcrypt.compare(password,user.password);
-
-    if(!match)
+    if(!isPasswordValid) {
+      //console.log("Password mismatch: entered =", password, "stored hash =", user.password);
       return res.status(401).json({error:"Invalid password"});
+    }
 
     const token = jwt.sign(
       { id:user.id, role:"teacher" },
@@ -71,9 +79,10 @@ exports.teacherLogin = async (req,res)=>{
     );
 
     res.json({
-      success:true,
+      success: true,
       token,
-      firstLogin:user.is_first_login
+      userId: user.id,
+      firstLogin: user.is_first_login
     });
 
   }catch(error){
@@ -92,17 +101,29 @@ exports.changePassword = async(req,res)=>{
 
   try{
 
-    const teacherId = req.user.id;
-
-    const { new_password } = req.body;
+    const { userId,new_password } = req.body;
 
     const hashed = await bcrypt.hash(new_password,10);
 
+    // Fetch current is_first_login value
+    const teacher = await pool.query(
+      `SELECT is_first_login FROM teachers WHERE id=$1`,
+      [userId]
+    );
+
+    if (teacher.rows.length === 0) {
+      return res.status(404).json({ error: "Teacher not found" });
+    }
+
+    if (!teacher.rows[0].is_first_login) {
+      return res.status(400).json({ error: "Password change not allowed after first login" });
+    }
+
     await pool.query(
       `UPDATE teachers 
-       SET password=$1,is_first_login=false
+       SET password=$1, is_first_login=false
        WHERE id=$2`,
-      [hashed,teacherId]
+      [hashed, userId]
     );
 
     res.json({
@@ -147,12 +168,7 @@ exports.forgotPassword = async(req,res)=>{
       [email,otp,expiry]
     );
 
-    await transporter.sendMail({
-      to: email,
-      subject: "Password Reset OTP",
-      text: `Hi ${teacher.rows[0].first_name},\n Your OTP is ${otp}. Valid for 5 minutes. /n\nRegards,\nSmartLearn Team
-      `
-    });
+    await sendOTPEmail(email, teacher.rows[0].first_name, otp);
 
     res.json({
       success:true,
@@ -212,11 +228,25 @@ exports.resetPassword = async(req,res)=>{
 
     const { email,new_password } = req.body;
 
-    const hashed = await bcrypt.hash(new_password,10);
+    // Check if OTP exists and is not expired
+    const otpRecord = await pool.query(
+      `SELECT * FROM teacher_password_otp WHERE email=$1 ORDER BY expires_at DESC LIMIT 1`,
+      [email]
+    );
+
+    if (otpRecord.rows.length === 0) {
+      return res.status(400).json({ error: "No OTP found. Please request a new OTP." });
+    }
+
+    if (new Date() > otpRecord.rows[0].expires_at) {
+      return res.status(400).json({ error: "OTP expired. Please request a new OTP." });
+    }
+
+    const hashed = await bcrypt.hash(new_password, 10);
 
     await pool.query(
       `UPDATE teachers SET password=$1 WHERE email=$2`,
-      [hashed,email]
+      [hashed, email]
     );
 
     await pool.query(
@@ -236,4 +266,59 @@ exports.resetPassword = async(req,res)=>{
 
   }
 
+};
+
+exports.resendOtp = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    // Find latest OTP for this email
+    const otpRecord = await pool.query(
+      `SELECT * FROM teacher_password_otp WHERE email=$1 ORDER BY expires_at DESC LIMIT 1`,
+      [email]
+    );
+
+    if (otpRecord.rows.length > 0) {
+      const latestOtp = otpRecord.rows[0];
+      const now = new Date();
+
+      if (now < latestOtp.expires_at) {
+        // OTP still valid, do not send new OTP
+        return res.status(400).json({
+          error: "OTP already sent. Please wait before requesting again."
+        });
+      }
+    }
+
+    // Generate new OTP and expiry
+    const otp = Math.floor(100000 + Math.random() * 900000);
+    const expiry = new Date(Date.now() + 5 * 60 * 1000);
+
+    // Insert new OTP record
+    await pool.query(
+      `INSERT INTO teacher_password_otp (email, otp, expires_at) VALUES ($1, $2, $3)`,
+      [email, otp, expiry]
+    );
+
+    // Fetch teacher's first name for email
+    const teacher = await pool.query(
+      `SELECT first_name FROM teachers WHERE email=$1`,
+      [email]
+    );
+
+    if (teacher.rows.length === 0) {
+      return res.status(404).json({ error: "Teacher not found" });
+    }
+
+    await sendOTPEmail(email, teacher.rows[0].first_name, otp);
+
+    res.json({
+      success: true,
+      message: "OTP resent"
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Resend OTP failed" });
+  }
 };

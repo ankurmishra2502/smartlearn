@@ -40,12 +40,17 @@ exports.saveAcademicDetails = async (req, res) => {
 
     const contactInfo = req.body.contact_number;
     const { school_name, district, state, country } = req.body;
-
+    const { first_name, last_name } = req.body;
     await pool.query(
       `INSERT INTO user_academic_details
        (user_id, school_name, district, state, country)
        VALUES ($1,$2,$3,$4,$5)`,
       [userId, school_name, district, state, country]
+    );
+
+    await pool.query(
+      `UPDATE users SET first_name = $1, last_name = $2 WHERE id = $3`,
+      [first_name, last_name, userId]
     );
 
     await pool.query(

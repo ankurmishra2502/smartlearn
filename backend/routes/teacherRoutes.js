@@ -17,4 +17,6 @@ router.post("/auth/verify-otp", teacherController.verifyOtp);
 
 router.post("/auth/reset-password", teacherController.resetPassword);
 
+router.post("/auth/resend-otp", teacherController.resendOtp);
+
 module.exports = router;

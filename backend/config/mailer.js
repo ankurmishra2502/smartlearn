@@ -49,3 +49,27 @@ SmartLearn Team`);
 };
 
 module.exports = sendTeacherEmail;
+
+const sendOTPEmail = async (email, first_name, otp) => {
+  const sentFrom = new Sender("test@test-r9084zv6mojgw63d.mlsender.net", "SmartLearn");
+
+  const recipients = [
+    new Recipient(email, first_name)
+  ];
+
+  const emailParams = new EmailParams()
+    .setFrom(sentFrom)
+    .setTo(recipients)
+    .setSubject("Password Reset OTP")
+    .setText(`Hi ${first_name},
+
+Your OTP is ${otp}. Valid for 5 minutes.
+
+Regards,
+SmartLearn Team`);
+
+  await mailerSend.email.send(emailParams);
+
+};
+
+module.exports= sendOTPEmail;
