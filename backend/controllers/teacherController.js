@@ -3,7 +3,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const transporter = require("../config/mailer");
-
+const sendTeacherEmail = require("../config/mailer")
 
 // ADMIN CREATE TEACHER
 exports.createTeacher = async (req, res) => {
@@ -24,25 +24,7 @@ exports.createTeacher = async (req, res) => {
       [first_name,last_name,email,mobile_number,hashedPassword]
     );
 
-    const info = await transporter.sendMail({
-  from: process.env.MAIL_USER,
-  to: email,
-  subject: "Teacher Account Created",
-  text: `Hi ${first_name},
-
-Your account is created.
-
-Email: ${email}
-Password: ${password}
-
-Please change password after login.
-
-Regards,
-SmartLearn Team`
-});
-
-console.log("Email sent:", info.response);
-
+    await sendTeacherEmail(email, first_name, password);
     res.json({
       success: true,
       message: "Teacher created and email sent"
