@@ -5,7 +5,7 @@ const cors = require("cors");
 
 const authRoutes = require("./routes/authRoutes");
 const userRoutes = require("./routes/userRoutes");
-const setupRoutes = require("./routes/setupRoutes");
+//const setupRoutes = require("./routes/setupRoutes");
 const app = express();
 
 const allowedOrigins = [
@@ -40,7 +40,7 @@ app.get("/", (req, res) => {
   res.send("Server running");
 });
 
-app.use("/api/setup", setupRoutes);
+//app.use("/api/setup", setupRoutes);
 
 const PORT = process.env.PORT || 5000;
 
