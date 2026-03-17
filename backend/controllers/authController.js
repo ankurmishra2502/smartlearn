@@ -1,3 +1,4 @@
+const axios = require("axios");
 const { OAuth2Client } = require("google-auth-library");
 const jwt = require("jsonwebtoken");
 const pool = require("../config/db");
@@ -10,12 +11,24 @@ exports.googleAuth = async (req, res) => {
 
     const { token,role } = req.body;
 
-    const ticket = await client.verifyIdToken({
-      idToken: token,
-      audience: process.env.GOOGLE_CLIENT_ID
-    });
-
-    const payload = ticket.getPayload();
+    if(!token){
+      return res.status(400).json({
+        success: false,
+        message: "Token is required"
+      });
+    }
+   
+    const ticket = await axios.get(
+      "https://www.googleapis.com/oauth2/v3/userinfo",
+      {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+        }
+    );
+    
+    
+    const payload = ticket.data;
 
 const { email, name, picture, sub } = payload;
 
