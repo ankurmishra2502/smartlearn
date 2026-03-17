@@ -10,7 +10,8 @@ const app = express();
 
 const allowedOrigins = [
   "http://localhost:5173", // frontend
-  "http://localhost:5000"  // backend (optional)
+  "http://localhost:5000", // backend (optional)
+  "https://ed-tech-mocha.vercel.app" // production frontend
 ];
 
 app.use(cors({
