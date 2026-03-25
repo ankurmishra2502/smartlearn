@@ -39,13 +39,14 @@ exports.saveAcademicDetails = async (req, res) => {
     const userId = req.body.id;
 
     const contactInfo = req.body.contact_number;
-    const { school_name, district, state, country } = req.body;
+    const { school_name, district, state, country, pincode, std } = req.body;
     const { first_name, last_name } = req.body;
+    console.log("Received academic details:", req.body);
     await pool.query(
       `INSERT INTO user_academic_details
-       (user_id, school_name, district, state, country)
-       VALUES ($1,$2,$3,$4,$5)`,
-      [userId, school_name, district, state, country]
+       (user_id, school_name, district, state, country, pincode, class)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [userId, school_name, district, state, country, pincode, std]
     );
 
     await pool.query(

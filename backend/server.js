@@ -6,6 +6,7 @@ const cors = require("cors");
 const authRoutes = require("./routes/authRoutes");
 const userRoutes = require("./routes/userRoutes");
 //const setupRoutes = require("./routes/setupRoutes");
+const setupCourseRoutes = require("./routes/courseRoutes");
 const app = express();
 
 const allowedOrigins = [
@@ -37,6 +38,7 @@ app.use(express.json());
 app.use("/api", require("./routes/teacherRoutes"));
 app.use("/auth", authRoutes);
 app.use("/user", userRoutes);
+app.use("/course", setupCourseRoutes);
 app.get("/", (req, res) => {
   res.send("Server running");
 });
