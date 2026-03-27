@@ -192,13 +192,54 @@ exports.getQuestionByQuizId = async (req, res) => {
 // =========================
 // 🎯 QUIZ SUBMISSION
 // =========================
-
 exports.submitQuiz = async (req, res) => {
   try {
     const { answers } = req.body;
-    const user_id = 1;
+    const user_id = req.user.userId;
     const { quiz_id } = req.params;
+    console.log("Received quiz submission:", { user_id, quiz_id, answers });
+    // ✅ Step 1: Get quiz details
+    const quiz = await pool.query(
+      "SELECT topic_id, passing_score FROM quizzes WHERE id = $1",
+      [quiz_id]
+    );
 
+    if (quiz.rows.length === 0) {
+      return res.status(404).json({ error: "Quiz not found" });
+    }
+
+    const topic_id = quiz.rows[0].topic_id;
+    const passing_score = quiz.rows[0].passing_score;
+
+    // ✅ Step 2: Check if already passed
+    const progressCheck = await pool.query(
+      `SELECT passed FROM user_quiz_progress 
+       WHERE user_id = $1 AND quiz_id = $2`,
+      [user_id, quiz_id]
+    );
+
+    if (progressCheck.rows[0]?.passed) {
+      return res.status(400).json({
+        error: "Quiz already passed. No more attempts allowed."
+      });
+    }
+
+    // ✅ Step 3: Check today's attempts (limit = 3)
+    const attemptsToday = await pool.query(
+      `SELECT COUNT(*) FROM user_quiz_attempts
+       WHERE user_id = $1 
+         AND quiz_id = $2
+         AND attempt_date = CURRENT_DATE`,
+      [user_id, quiz_id]
+    );
+
+    if (parseInt(attemptsToday.rows[0].count) >= 3) {
+      return res.status(400).json({
+        error: "Daily attempt limit reached (3 attempts)"
+      });
+    }
+
+    // ✅ Step 4: Evaluate quiz (your existing logic)
     let correct = 0;
 
     for (let ans of answers) {
@@ -219,40 +260,123 @@ exports.submitQuiz = async (req, res) => {
 
     const totalQuestions = answers.length;
     const score = (correct / totalQuestions) * 100;
-
-    // Get topic_id
-    const quiz = await pool.query(
-      "SELECT topic_id, passing_score FROM quizzes WHERE id = $1",
-      [quiz_id]
-    );
-
-    const topic_id = quiz.rows[0].topic_id;
-    const passing_score = quiz.rows[0].passing_score;
+    const incorrect = totalQuestions - correct;
 
     const passed = score >= passing_score;
 
-    // Update Progress
+    // ✅ Step 5: Insert into attempts table
     await pool.query(
-      `INSERT INTO user_topic_progress 
-       (user_id, topic_id, quiz_completed, quiz_score, completed_at)
-       VALUES ($1, $2, $3, $4, NOW())
-       ON CONFLICT (user_id, topic_id)
-       DO UPDATE SET
-         quiz_completed = $3,
-         quiz_score = $4,
-         completed_at = NOW()`,
-      [user_id, topic_id, passed, score]
+      `INSERT INTO user_quiz_attempts 
+       (user_id, topic_id, quiz_id, score, passed)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [user_id, topic_id, quiz_id, score, passed]
     );
 
+    // ✅ Step 6: Upsert quiz progress
+    await pool.query(
+      `INSERT INTO user_quiz_progress
+       (user_id, topic_id, quiz_id, latest_score, passed, total_attempts, last_attempted_at)
+       VALUES ($1, $2, $3, $4, $5, 1, NOW())
+       ON CONFLICT (user_id, quiz_id)
+       DO UPDATE SET
+         latest_score = EXCLUDED.latest_score,
+         passed = EXCLUDED.passed,
+         total_attempts = user_quiz_progress.total_attempts + 1,
+         last_attempted_at = NOW()`,
+      [user_id, topic_id, quiz_id, score, passed]
+    );
+
+    // ✅ Step 7 (Optional): Update topic progress
+    // await pool.query(
+    //   `INSERT INTO user_topic_progress 
+    //    (user_id, topic_id, quiz_completed, quiz_score, completed_at)
+    //    VALUES ($1, $2, $3, $4, NOW())
+    //    ON CONFLICT (user_id, topic_id)
+    //    DO UPDATE SET
+    //      quiz_completed = $3,
+    //      quiz_score = $4,
+    //      completed_at = NOW()`,
+    //   [user_id, topic_id, passed, score]
+    // );
+
+    // ✅ Final response
     res.json({
       score,
-      passed
+      correct,
+      incorrect,
+      totalQuestions,
+      passed,
+      attempts_today: parseInt(attemptsToday.rows[0].count) + 1
     });
 
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 };
+// exports.submitQuiz = async (req, res) => {
+//   try {
+//     const { answers } = req.body;
+//     const user_id = req.user.userId;
+//     const { quiz_id } = req.params;
+
+//     let correct = 0;
+
+//     for (let ans of answers) {
+//       const correctOptions = await pool.query(
+//         `SELECT id FROM quiz_options 
+//          WHERE question_id = $1 AND is_correct = true`,
+//         [ans.question_id]
+//       );
+
+//       const correctIds = correctOptions.rows.map(o => o.id).sort();
+//       const selectedIds = ans.selected_option_ids.sort();
+
+//       const isCorrect =
+//         JSON.stringify(correctIds) === JSON.stringify(selectedIds);
+
+//       if (isCorrect) correct++;
+//     }
+
+//     const totalQuestions = answers.length;
+//     const score = (correct / totalQuestions) * 100;
+//     const incorrect = totalQuestions - correct;
+//     // Get topic_id
+//     const quiz = await pool.query(
+//       "SELECT topic_id, passing_score FROM quizzes WHERE id = $1",
+//       [quiz_id]
+//     );
+
+//     const topic_id = quiz.rows[0].topic_id;
+//     const passing_score = quiz.rows[0].passing_score;
+
+//     const passed = score >= passing_score;
+
+//     // Update Progress
+//     await pool.query(
+//       `INSERT INTO user_topic_progress 
+//        (user_id, topic_id, quiz_completed, quiz_score, completed_at)
+//        VALUES ($1, $2, $3, $4, NOW())
+//        ON CONFLICT (user_id, topic_id)
+//        DO UPDATE SET
+//          quiz_completed = $3,
+//          quiz_score = $4,
+//          completed_at = NOW()`,
+//       [user_id, topic_id, passed, score]
+//     );
+
+//     res.json({
+//       score,
+//       correct,
+//       incorrect,
+//       totalQuestions,
+//       passed
+//     });
+
+//   } catch (err) {
+//     res.status(500).json({ error: err.message });
+//   }
+// };
 
 exports.checkAnswer = async (req, res) => {
   try {
@@ -386,3 +510,63 @@ exports.getFullCourse = async (req, res) => {
   }
 };
 
+exports.getRemainingAttempts = async (req, res) => {
+  try {
+    const user_id = req.user.userId; // UUID
+    const { topic_id } = req.params;
+
+    // ✅ Step 1: Get quiz_id
+    const quizResult = await pool.query(
+      `SELECT id FROM quizzes WHERE topic_id = $1`,
+      [topic_id]
+    );
+
+    if (quizResult.rows.length === 0) {
+      return res.status(404).json({ error: "Quiz not found for this topic" });
+    }
+
+    const quiz_id = quizResult.rows[0].id;
+
+    // ✅ Step 2: Check if already completed (passed)
+    const progress = await pool.query(
+      `SELECT passed FROM user_quiz_progress
+       WHERE user_id = $1 AND quiz_id = $2`,
+      [user_id, quiz_id]
+    );
+
+    if (progress.rows[0]?.passed) {
+      return res.json({
+        quiz_id,
+        status: "completed",
+        attempts_used: 0,
+        attempts_left: 0
+      });
+    }
+
+    // ✅ Step 3: Count today's attempts
+    const attemptsResult = await pool.query(
+      `SELECT COUNT(*) FROM user_quiz_attempts
+       WHERE user_id = $1
+         AND quiz_id = $2
+         AND attempt_date = CURRENT_DATE`,
+      [user_id, quiz_id]
+    );
+
+    const attemptsUsed = parseInt(attemptsResult.rows[0].count);
+    const MAX_ATTEMPTS = 3;
+
+    const attempts_left = Math.max(0, MAX_ATTEMPTS - attemptsUsed);
+
+    // ✅ Step 4: Return proper status
+    res.json({
+      quiz_id,
+      status: attempts_left === 0 ? "limit_reached" : "available",
+      attempts_used: attemptsUsed,
+      attempts_left
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+};
