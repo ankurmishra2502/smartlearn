@@ -3,13 +3,13 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const transporter = require("../config/mailer");
-const sendTeacherEmail = require("../config/mailer");
-const sendOTPEmail = require("../config/mailer");
+const Sender  = require("../config/mailer");
+
 // ADMIN CREATE TEACHER
 exports.createTeacher = async (req, res) => {
 
   try {
-
+    console.log("Received data for new teacher:", req.body);
     const { first_name, last_name, email, mobile_number } = req.body;
 
     console.log("Incoming data:", req.body);
@@ -28,7 +28,8 @@ exports.createTeacher = async (req, res) => {
       [first_name,last_name,email,mobile_number,hashedPassword]
     );
 
-     await sendTeacherEmail(email, first_name, tempPassword);
+    
+    await Sender.sendTeacherEmail(email, first_name, tempPassword);
 
     res.json({
       success: true,
@@ -40,7 +41,8 @@ exports.createTeacher = async (req, res) => {
     console.error("Insert error:", error);
 
     res.status(500).json({
-      error: "Teacher creation failed"
+
+      error: error.message || "Failed to create teacher"
     });
 
   }
@@ -168,7 +170,7 @@ exports.forgotPassword = async(req,res)=>{
       [email,otp,expiry]
     );
 
-    await sendOTPEmail(email, teacher.rows[0].first_name, otp);
+    await Sender.sendOTPEmail(email, teacher.rows[0].first_name, otp);
 
     res.json({
       success:true,
@@ -310,7 +312,7 @@ exports.resendOtp = async (req, res) => {
       return res.status(404).json({ error: "Teacher not found" });
     }
 
-    await sendOTPEmail(email, teacher.rows[0].first_name, otp);
+    await Sender.sendOTPEmail(email, teacher.rows[0].first_name, otp);
 
     res.json({
       success: true,
