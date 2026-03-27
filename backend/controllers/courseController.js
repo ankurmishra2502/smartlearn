@@ -21,8 +21,31 @@ exports.createSubject = async (req, res) => {
 };
 
 exports.getSubjects = async (req, res) => {
-  const result = await pool.query("SELECT * FROM subjects");
-  res.json(result.rows);
+  const Subresult = await pool.query("SELECT * FROM subjects");
+  const topicResult = await pool.query("SELECT * FROM topics");
+  const subjects = Subresult.rows;
+    const topics = topicResult.rows;
+
+    // ✅ 3. Map topics to subjects
+    const subjectMap = {};
+
+    subjects.forEach(sub => {
+      subjectMap[sub.id] = {
+        ...sub,
+        topics: []
+      };
+    });
+
+    topics.forEach(topic => {
+      if (subjectMap[topic.subject_id]) {
+        subjectMap[topic.subject_id].topics.push(topic);
+      }
+    });
+
+    // ✅ 4. Final array
+    const result = Object.values(subjectMap);
+
+    res.json(result);
 };
 
 
@@ -62,6 +85,7 @@ exports.getTopicsBySubject = async (req, res) => {
     "SELECT * FROM topics WHERE subject_id = $1 ORDER BY order_index",
     [subject_id]
   );
+  
 
   res.json(result.rows);
 };
