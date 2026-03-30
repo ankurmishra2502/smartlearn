@@ -22,6 +22,7 @@ const mailerSend = new MailerSend({
 });
 
 const sendTeacherEmail = async (email, first_name, password) => {
+  console.log("Preparing to send email to:", email);
 
   const sentFrom = new Sender("test@test-r9084zv6mojgw63d.mlsender.net", "SmartLearn");
 
@@ -48,7 +49,7 @@ SmartLearn Team`);
   await mailerSend.email.send(emailParams);
 };
 
-module.exports = sendTeacherEmail;
+
 
 const sendOTPEmail = async (email, first_name, otp) => {
   const sentFrom = new Sender("test@test-r9084zv6mojgw63d.mlsender.net", "SmartLearn");
@@ -72,4 +73,7 @@ SmartLearn Team`);
 
 };
 
-module.exports= sendOTPEmail;
+module.exports= {
+  sendTeacherEmail,
+  sendOTPEmail
+};
