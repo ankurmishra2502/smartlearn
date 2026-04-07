@@ -59,68 +59,50 @@ async function updateSubjectStreak(client, userId, subjectId) {
 }
 
 async function updateGlobalStreak(client, userId) {
-    console.log("Updating global streak for user:", userId);
-  // ✅ Ensure user_stats row exists
+  console.log("Updating global streak for user:", userId);
+
+  // ✅ Ensure row exists
   await client.query(
-    `INSERT INTO user_stats (user_id, current_streak, longest_streak)
-     VALUES ($1, 0, 0)
+    `INSERT INTO user_stats (user_id, current_streak, longest_streak, last_active_date)
+     VALUES ($1, 0, 0, NULL)
      ON CONFLICT (user_id) DO NOTHING`,
     [userId]
   );
 
-  const data = await client.query(
-    `SELECT current_streak, last_active_date 
-     FROM user_stats 
+  // 🔥 Get streak status directly from SQL
+  const result = await client.query(
+    `SELECT 
+        current_streak,
+        last_active_date,
+        CASE 
+          WHEN last_active_date IS NULL THEN 'first_time'
+          WHEN last_active_date = CURRENT_DATE THEN 'same_day'
+          WHEN last_active_date = CURRENT_DATE - INTERVAL '1 day' THEN 'continue'
+          ELSE 'reset'
+        END AS status
+     FROM user_stats
      WHERE user_id = $1`,
     [userId]
   );
 
-  const row = data.rows[0];
-
-  const today = new Date();
-  const todayStr = today.toISOString().split("T")[0];
+  const row = result.rows[0];
 
   let newStreak = 1;
 
-  // ✅ FIRST TIME (no last_active_date)
-  if (!row.last_active_date) {
-    newStreak = 1;
-
-    await client.query(
-      `UPDATE user_stats
-       SET current_streak = 1,
-           longest_streak = 1,
-           last_active_date = CURRENT_DATE
-       WHERE user_id = $1`,
-      [userId]
-    );
-
-    return { updated: true, streak: 1 };
-  }
-
-  const lastDateStr = new Date(row.last_active_date)
-    .toISOString()
-    .split("T")[0];
-
-  // ❌ SAME DAY → DO NOTHING
-  if (lastDateStr === todayStr) {
+  // ✅ SAME DAY → DO NOTHING
+  if (row.status === "same_day") {
     return {
       updated: false,
       streak: row.current_streak
     };
   }
 
-  const lastDate = new Date(row.last_active_date);
-
-  const diffDays = Math.floor(
-    (today - lastDate) / (1000 * 60 * 60 * 24)
-  );
-
-  if (diffDays === 1) {
+  // ✅ CONTINUE STREAK
+  if (row.status === "continue") {
     newStreak = row.current_streak + 1;
-  } else {
-    newStreak = 1; // missed day reset
   }
+
+  // ✅ FIRST TIME or RESET → streak = 1
 
   await client.query(
     `UPDATE user_stats
@@ -131,8 +113,88 @@ async function updateGlobalStreak(client, userId) {
     [newStreak, userId]
   );
 
-  return { updated: true, streak: newStreak };
+  return {
+    updated: true,
+    streak: newStreak
+  };
 }
+
+
+// async function updateGlobalStreak(client, userId) {
+//     console.log("Updating global streak for user:", userId);
+//   // ✅ Ensure user_stats row exists
+//   await client.query(
+//     `INSERT INTO user_stats (user_id, current_streak, longest_streak)
+//      VALUES ($1, 0, 0)
+//      ON CONFLICT (user_id) DO NOTHING`,
+//     [userId]
+//   );
+
+//   const data = await client.query(
+//     `SELECT current_streak, last_active_date 
+//      FROM user_stats 
+//      WHERE user_id = $1`,
+//     [userId]
+//   );
+
+//   const row = data.rows[0];
+
+//   const today = new Date();
+//   const todayStr = today.toISOString().split("T")[0];
+
+//   let newStreak = 1;
+
+//   // ✅ FIRST TIME (no last_active_date)
+//   if (!row.last_active_date) {
+//     newStreak = 1;
+
+//     await client.query(
+//       `UPDATE user_stats
+//        SET current_streak = 1,
+//            longest_streak = 1,
+//            last_active_date = CURRENT_DATE
+//        WHERE user_id = $1`,
+//       [userId]
+//     );
+
+//     return { updated: true, streak: 1 };
+//   }
+
+//   const lastDateStr = new Date(row.last_active_date)
+//     .toISOString()
+//     .split("T")[0];
+
+//   // ❌ SAME DAY → DO NOTHING
+//   if (lastDateStr === todayStr) {
+//     return {
+//       updated: false,
+//       streak: row.current_streak
+//     };
+//   }
+
+//   const lastDate = new Date(row.last_active_date);
+
+//   const diffDays = Math.floor(
+//     (today - lastDate) / (1000 * 60 * 60 * 24)
+//   );
+
+//   if (diffDays === 1) {
+//     newStreak = row.current_streak + 1;
+//   } else {
+//     newStreak = 1; // missed day reset
+//   }
+
+//   await client.query(
+//     `UPDATE user_stats
+//      SET current_streak = $1,
+//          longest_streak = GREATEST(longest_streak, $1),
+//          last_active_date = CURRENT_DATE
+//      WHERE user_id = $2`,
+//     [newStreak, userId]
+//   );
+
+//   return { updated: true, streak: newStreak };
+// }
 
 
 module.exports = {
