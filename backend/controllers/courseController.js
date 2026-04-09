@@ -558,10 +558,12 @@ exports.getQuestionByQuizId = async (req, res) => {
 
 exports.submitQuiz = async (req, res) => {
   try {
+    
     const { answers } = req.body;
     const user_id = req.user.userId;
     const { quiz_id } = req.params;
-
+    
+    console.log("Received quiz submission:", { user_id, quiz_id, answers });
     // 1️⃣ Quiz details
     const quiz = await pool.query(
       `SELECT topic_id, passing_score,difficulty, xp_reward, max_attempts_per_day
@@ -667,18 +669,27 @@ exports.submitQuiz = async (req, res) => {
     );
 
     // 8️⃣ Topic completion (FIXED)
-    const topicCheck = await pool.query(
-      `SELECT 
-        (SELECT COUNT(*) FROM quizzes WHERE topic_id = $1) as total,
-        (SELECT COUNT(*) FROM user_quiz_progress 
-         WHERE user_id = $2 AND topic_id = $1 AND passed = true) as passed`,
-      [topic_id, user_id]
-    );
+const topicCheck = await pool.query(
+  `SELECT 
+     COUNT(q.id) AS total,
+     COUNT(DISTINCT CASE WHEN uqp.passed = true THEN uqp.quiz_id END) AS passed
+   FROM quizzes q
+   LEFT JOIN user_quiz_progress uqp
+     ON q.id = uqp.quiz_id AND uqp.user_id = $2
+   WHERE q.topic_id = $1`,
+  [topic_id, user_id]
+);
 
-    const total = parseInt(topicCheck.rows[0].total);
-    const passedCount = parseInt(topicCheck.rows[0].passed);
+const total = parseInt(topicCheck.rows[0].total || 0);
+const passedCount = parseInt(topicCheck.rows[0].passed || 0);
 
-    const topicCompleted = total === passedCount;
+const topicCompleted = total > 0 && total === passedCount;
+
+const referType = await pool.query(
+       `SELECT title FROM quizzes WHERE id = $1 and topic_id = $2`,
+       [quiz_id,topic_id]
+     );
+
     if(passed){
       const subjectQuery = await pool.query(
         `SELECT subject_id FROM topics WHERE id = $1`,
@@ -702,11 +713,26 @@ exports.submitQuiz = async (req, res) => {
       xpResult = await xpService.assignXP({
         userId: user_id,
         eventType: eventType || "QUIZ_COMPLETED",
-        referenceType: "Quiz Completion",
+        referenceType: referType.rows[0]?.title,
         sourceId: quiz_id,
         metadata: { topic_id, score }
       });
     }
+
+    const referTypeTopic = await pool.query(
+      `SELECT title FROM topics WHERE id = $1`,
+      [topic_id]
+    );
+
+    if(topicCompleted){
+      xpResultTopic = await xpService.assignXP({
+        userId: user_id,
+        eventType: "TOPIC_COMPLETED",
+        referenceType: referTypeTopic.rows[0]?.title,
+        sourceId: topic_id
+      });
+    }
+
 
     res.json({
       score,

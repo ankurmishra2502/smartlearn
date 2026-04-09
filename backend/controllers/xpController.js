@@ -1,6 +1,37 @@
 const xpService = require("../services/xpService");
 const pool = require("../config/db");
 
+function formatXPLabel(item) {
+  const event = item.event_type;
+
+  if (event === "QUIZ_COMPLETED" && item.reference_type) {
+    return `Quiz: ${item.reference_type}`;
+  }
+
+  if (event === "HARD_COMPLETED") {
+    return `Hard Quiz: ${item.reference_type || ""}`;
+  }
+
+  if (event === "MEDIUM_COMPLETED") {
+    return `Medium Quiz: ${item.reference_type || ""}`;
+  }
+
+  if (event === "EASY_COMPLETED") {
+    return `Easy Quiz: ${item.reference_type || ""}`;
+  }
+
+  if (event === "TOPIC_COMPLETED" && item.reference_type) {
+    return `Topic Completed: ${item.reference_type}`;
+  }
+
+  if (event === "DAILY_ACTIVE") {
+    return "Daily Login";
+  }
+
+  // fallback
+  return event;
+}
+
 // DAILY ACTIVITY
 exports.handleDailyActivity = async (req, res) => {
   try {
@@ -353,6 +384,87 @@ exports.getStreakDashboard = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to fetch streak data"
+    });
+  }
+};
+
+exports.getMyProgress = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    const statsResult = await pool.query(
+      `SELECT 
+         total_xp,
+         level,
+         (total_xp - (level * 100)) AS progress_xp,
+         ((level + 1) * 100 - total_xp) AS required_xp
+       FROM user_stats
+       WHERE user_id = $1`,
+      [userId]
+    );
+
+    const stats = statsResult.rows[0];
+
+   const historyResult = await pool.query(
+  `SELECT 
+     xt.event_type,
+     xt.reference_type,
+     xt.source_id,
+     xt.xp,
+     xt.created_at
+   FROM xp_transactions xt
+   WHERE xt.user_id = $1
+   ORDER BY xt.created_at DESC
+   LIMIT 5`,
+  [userId]
+);
+
+    if (!stats) {
+      return res.json({
+        success: true,
+        data: {
+          level: 0,
+          total_xp: 0,
+          progress: {
+            current: 0,
+            required: 100,
+            percent: 0
+          },
+          recent_xp: []
+        }
+      });
+    }
+
+    const progressPercent = Math.floor(
+      (stats.progress_xp / 100) * 100
+    );
+
+    res.json({
+      success: true,
+      data: {
+        level: stats.level,
+        total_xp: stats.total_xp,
+
+        progress: {
+          current: stats.progress_xp,     // XP in current level
+          required: stats.required_xp,    // XP needed to next level
+          percent: progressPercent
+        },
+
+        recent_xp: historyResult.rows.map(item => ({
+          xp: item.xp,
+          label: formatXPLabel(item),
+          event_type: item.event_type,
+          created_at: item.created_at
+        }))
+      }
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch progress"
     });
   }
 };

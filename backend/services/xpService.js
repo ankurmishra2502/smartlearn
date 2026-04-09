@@ -30,7 +30,7 @@ async function assignXP({
     await client.query("BEGIN");
 
     const xpValue = await getXPValue(client, eventType);
-
+    console.log(`Assigning ${xpValue} XP for event ${eventType} to user ${userId} source: ${sourceId},reference: ${referenceType}, metadata: ${JSON.stringify(metadata)}`);
     const insert = await client.query(
       `INSERT INTO xp_transactions 
        (user_id, event_type, reference_type, source_id, xp, metadata)

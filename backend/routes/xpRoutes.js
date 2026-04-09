@@ -11,4 +11,5 @@ router.get("/stats",authMiddleware, xpController.getUserStats);
 router.get("/global",authMiddleware, xpController.getGlobalRanking);
 router.get("/leaderboard",authMiddleware, xpController.getLeaderboard);
 router.get("/streaks",authMiddleware, xpController.getStreakDashboard);
+router.get("/mybest",authMiddleware, xpController.getMyProgress);
 module.exports = router;
