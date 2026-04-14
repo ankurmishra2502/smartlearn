@@ -5,8 +5,8 @@ const cors = require("cors");
 
 const authRoutes = require("./routes/authRoutes");
 const userRoutes = require("./routes/userRoutes");
-const setupRoutes = require("./routes/setupRoutes");
-//const setupCourseRoutes = require("./routes/courseRoutes");
+//const setupRoutes = require("./routes/setupRoutes");
+const setupCourseRoutes = require("./routes/courseRoutes");
 const xpRoutes = require("./routes/xpRoutes");
 const app = express();
 
