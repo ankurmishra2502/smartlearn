@@ -2,6 +2,7 @@ const axios = require("axios");
 const { OAuth2Client } = require("google-auth-library");
 const jwt = require("jsonwebtoken");
 const pool = require("../config/db");
+const bcrypt = require("bcrypt");
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -90,4 +91,45 @@ if (existingUser.rows.length > 0) {
 
   }
 
+};
+
+exports.teacherLogin = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    const result = await pool.query(
+      `SELECT * FROM teachers WHERE email=$1`,
+      [email]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ message: "Teacher not found" });
+    }
+
+    const teacher = result.rows[0];
+
+    const isMatch = await bcrypt.compare(password, teacher.password);
+
+    if (!isMatch) {
+      return res.status(401).json({ message: "Invalid password" });
+    }
+
+    const token = jwt.sign(
+      {
+        id: teacher.id,
+        role: "teacher"
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    res.json({
+      token,
+      teacher
+    });
+
+  } catch (err) {
+    console.error("LOGIN ERROR:", err);
+    res.status(500).json({ message: "Login error" });
+  }
 };

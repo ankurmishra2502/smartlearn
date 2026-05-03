@@ -8,10 +8,15 @@ const authMiddleware = (req, res, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    req.user = {
-      userId: decoded.id,
-    };
-
+    if(decoded.role === "teacher") {
+      req.teacher = {
+        teacherId: decoded.id,
+      };
+    } else {
+      req.user = {
+        userId: decoded.id,
+      };
+    }
     next();
 
   } catch (error) {

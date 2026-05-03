@@ -559,11 +559,10 @@ exports.getQuestionByQuizId = async (req, res) => {
 exports.submitQuiz = async (req, res) => {
   try {
     
-    const { answers } = req.body;
+    const { answers ,time_spent} = req.body;
     const user_id = req.user.userId;
     const { quiz_id } = req.params;
-    
-    console.log("Received quiz submission:", { user_id, quiz_id, answers });
+    console.log("Received quiz submission:", { user_id, quiz_id, answers,time_spent });
     // 1️⃣ Quiz details
     const quiz = await pool.query(
       `SELECT topic_id, passing_score,difficulty, xp_reward, max_attempts_per_day
@@ -649,9 +648,9 @@ exports.submitQuiz = async (req, res) => {
     // 6️⃣ Save attempt
     await pool.query(
       `INSERT INTO user_quiz_attempts 
-       (user_id, topic_id, quiz_id, score, passed)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [user_id, topic_id, quiz_id, score, passed]
+       (user_id, topic_id, quiz_id, score, passed, time_spent_seconds)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [user_id, topic_id, quiz_id, score, passed, time_spent]
     );
 
     // 7️⃣ Upsert progress
@@ -740,6 +739,7 @@ const referType = await pool.query(
       incorrect,
       totalQuestions,
       passed,
+      time_spent_seconds: time_spent,
       attempts_today: parseInt(attemptsToday.rows[0].count) + 1,
       xp_awarded: xpResult ? xpResult.awarded : false,
       message: passed
@@ -900,44 +900,58 @@ exports.getFullCourse = async (req, res) => {
     const result = [];
 
     for (let topic of topics.rows) {
+
       const video = await pool.query(
         "SELECT * FROM topic_videos WHERE topic_id = $1",
         [topic.id]
       );
 
-      const quiz = await pool.query(
+      // ✅ GET ALL QUIZZES (easy, medium, hard)
+      const quizzes = await pool.query(
         "SELECT * FROM quizzes WHERE topic_id = $1",
         [topic.id]
       );
 
-      let questions = [];
+      const quizMap = {
+        easy: null,
+        medium: null,
+        hard: null
+      };
 
-      if (quiz.rows.length) {
-        const q = await pool.query(
+      for (let quiz of quizzes.rows) {
+
+        // ✅ Fetch questions for each quiz
+        const questionsRes = await pool.query(
           "SELECT * FROM quiz_questions WHERE quiz_id = $1",
-          [quiz.rows[0].id]
+          [quiz.id]
         );
 
-        for (let ques of q.rows) {
-          const options = await pool.query(
+        const questions = [];
+
+        for (let ques of questionsRes.rows) {
+
+          const optionsRes = await pool.query(
             "SELECT * FROM quiz_options WHERE question_id = $1",
             [ques.id]
           );
 
           questions.push({
             ...ques,
-            options: options.rows
+            options: optionsRes.rows
           });
         }
+
+        // ✅ Map by difficulty
+        quizMap[quiz.difficulty] = {
+          ...quiz,
+          questions
+        };
       }
 
       result.push({
         topic,
-        video: video.rows[0],
-        quiz: {
-          ...quiz.rows[0],
-          questions
-        }
+        video: video.rows[0] || null,
+        quizzes: quizMap
       });
     }
 
@@ -947,9 +961,77 @@ exports.getFullCourse = async (req, res) => {
     });
 
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 };
+// exports.getFullCourse = async (req, res) => {
+//   try {
+//     const { subject_id } = req.params;
+
+//     const subject = await pool.query(
+//       "SELECT * FROM subjects WHERE id = $1",
+//       [subject_id]
+//     );
+
+//     const topics = await pool.query(
+//       "SELECT * FROM topics WHERE subject_id = $1 ORDER BY order_index",
+//       [subject_id]
+//     );
+
+//     const result = [];
+
+//     for (let topic of topics.rows) {
+//       const video = await pool.query(
+//         "SELECT * FROM topic_videos WHERE topic_id = $1",
+//         [topic.id]
+//       );
+
+//       const quiz = await pool.query(
+//         "SELECT * FROM quizzes WHERE topic_id = $1",
+//         [topic.id]
+//       );
+
+//       let questions = [];
+
+//       if (quiz.rows.length) {
+//         const q = await pool.query(
+//           "SELECT * FROM quiz_questions WHERE quiz_id = $1",
+//           [quiz.rows[0].id]
+//         );
+
+//         for (let ques of q.rows) {
+//           const options = await pool.query(
+//             "SELECT * FROM quiz_options WHERE question_id = $1",
+//             [ques.id]
+//           );
+
+//           questions.push({
+//             ...ques,
+//             options: options.rows
+//           });
+//         }
+//       }
+
+//       result.push({
+//         topic,
+//         video: video.rows[0],
+//         quiz: {
+//           ...quiz.rows[0],
+//           questions
+//         }
+//       });
+//     }
+
+//     res.json({
+//       subject: subject.rows[0],
+//       topics: result
+//     });
+
+//   } catch (err) {
+//     res.status(500).json({ error: err.message });
+//   }
+// };
 
 // exports.getRemainingAttempts = async (req, res) => {
 //   try {

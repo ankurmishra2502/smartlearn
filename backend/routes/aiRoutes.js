@@ -1,0 +1,10 @@
+const express = require("express");
+const router = express.Router();
+const controller = require("../controllers/aiController");
+const rateLimit = require("../middleware/rateLimiter");
+const auth = require("../middleware/authMiddleware");
+router.post("/ask",auth,rateLimit, controller.askAI);
+router.post("/conversation",auth, controller.getOrCreateConversation);
+router.post("/chat",auth, controller.sendMessage);
+router.get("/conversation/:id",auth, controller.getMessages);
+module.exports = router;

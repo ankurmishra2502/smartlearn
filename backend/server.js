@@ -2,13 +2,26 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
+const http = require("http");
+const { initSocket } = require("./sockets/socket");
+console.log("REDIS_URL:", process.env.REDIS_URL);
 
 const authRoutes = require("./routes/authRoutes");
 const userRoutes = require("./routes/userRoutes");
 //const setupRoutes = require("./routes/setupRoutes");
 const CourseRoutes = require("./routes/courseRoutes");
 const xpRoutes = require("./routes/xpRoutes");
+const progressRoutes = require('./routes/progressRoutes');
+const aiRoutes = require("./routes/aiRoutes");
+const roomRoutes = require("./routes/roomRoutes");
+const teacherHomeworkRoutes = require("./routes/teacherHomeworkRoutes"); 
+const studentHomeworkRoutes = require("./routes/studentHomeworkRoutes");
+const leaderboardRoutes = require("./routes/leaderboardRoutes");
+const { Server } = require("net");
 const app = express();
+
+
+
 
 const allowedOrigins = [
   "http://localhost:5173", // frontend
@@ -41,14 +54,24 @@ app.use("/auth", authRoutes);
 app.use("/user", userRoutes);
 app.use("/course", CourseRoutes);
 app.use("/xp", xpRoutes);
+app.use("/progress", progressRoutes);
+app.use("/ai", aiRoutes);
+app.use("/room", roomRoutes);
+app.use("/teacher", teacherHomeworkRoutes);
+app.use("/student", studentHomeworkRoutes);
+app.use("/leaderboard", leaderboardRoutes);
 app.get("/", (req, res) => {
   res.send("Server running");
 });
 
 //app.use("/api/setup", setupRoutes);
 
+
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, "0.0.0.0", () => {
+const server = http.createServer(app);
+initSocket(server);
+
+server.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
 });
