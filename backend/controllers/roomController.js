@@ -210,13 +210,28 @@ exports.getRoomDetails = async (req, res) => {
 
     // 🔥 7. AI Feed (READ ONLY)
     const feedRes = await pool.query(
-      `SELECT id, user_id, title, content, created_at
-       FROM shared_ai_feed
-       WHERE room_id = $1
-       ORDER BY created_at DESC
-       LIMIT 20`,
-      [roomId]
-    );
+  `SELECT id, host_id, prompt, response, created_at
+   FROM host_ai_feed
+   WHERE room_id = $1
+   ORDER BY created_at DESC`,
+  [roomId]
+);
+
+ const groupedFeed = {};
+
+feedRes.rows.forEach((chat) => {
+  const dateKey = new Date(chat.created_at)
+    .toISOString()
+    .split("T")[0]; 
+  // Example: 2026-05-07
+
+  if (!groupedFeed[dateKey]) {
+    groupedFeed[dateKey] = [];
+  }
+
+  groupedFeed[dateKey].push(chat);
+});
+
 
     // 🔥 8. Role
     const role = userId === room.host_id ? "host" : "participant";
@@ -263,7 +278,7 @@ exports.getRoomDetails = async (req, res) => {
       goals: goalsRes.rows,
 
       // 🔥 IMPORTANT: read-only AI chats
-      feed: feedRes.rows
+      feed: groupedFeed
     });
 
   } catch (err) {
