@@ -17,6 +17,7 @@ const roomRoutes = require("./routes/roomRoutes");
 const teacherHomeworkRoutes = require("./routes/teacherHomeworkRoutes"); 
 const studentHomeworkRoutes = require("./routes/studentHomeworkRoutes");
 const leaderboardRoutes = require("./routes/leaderboardRoutes");
+const statsRoutes = require("./routes/statsRoutes");
 const { Server } = require("net");
 const app = express();
 
@@ -29,25 +30,32 @@ const allowedOrigins = [
   "https://ed-tech-mocha.vercel.app" // production frontend
 ];
 
-app.use(cors({
-  origin: function (origin, callback) {
+app.use(
+  cors({
+    origin: "*",
+    credentials: true
+  })
+);
 
-    // Allow Postman / curl (no origin)
-    if (!origin) return callback(null, true);
+// app.use(cors({
+//   origin: function (origin, callback) {
 
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
+//     // Allow Postman / curl (no origin)
+//     if (!origin) return callback(null, true);
 
-    return callback(new Error("Not allowed by CORS"));
-  },
+//     if (allowedOrigins.includes(origin)) {
+//       return callback(null, true);
+//     }
 
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+//     return callback(new Error("Not allowed by CORS"));
+//   },
 
-  allowedHeaders: ["Content-Type", "Authorization"],
+//   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
 
-  credentials: true
-}));
+//   allowedHeaders: ["Content-Type", "Authorization"],
+
+//   credentials: true
+// }));
 app.use(express.json());
 app.use("/api", require("./routes/teacherRoutes"));
 app.use("/auth", authRoutes);
@@ -60,6 +68,7 @@ app.use("/room", roomRoutes);
 app.use("/teacher", teacherHomeworkRoutes);
 app.use("/student", studentHomeworkRoutes);
 app.use("/leaderboard", leaderboardRoutes);
+app.use("/stats", statsRoutes);
 app.get("/", (req, res) => {
   res.send("Server running");
 });

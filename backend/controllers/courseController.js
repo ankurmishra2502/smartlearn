@@ -559,11 +559,20 @@ exports.getQuestionByQuizId = async (req, res) => {
 exports.submitQuiz = async (req, res) => {
   try {
     
-    const { answers ,time_spent} = req.body;
+    const { answers ,time_spent,started_at} = req.body;
     const user_id = req.user.userId;
     const { quiz_id } = req.params;
     console.log("Received quiz submission:", { user_id, quiz_id, answers,time_spent });
     // 1️⃣ Quiz details
+    // NEW: calculate timestamps
+    const startedAt = started_at
+    ? new Date(started_at)
+    : new Date();
+
+    const submittedAt = new Date(
+    startedAt.getTime() + Number(time_spent || 0) * 1000
+    );
+    
     const quiz = await pool.query(
       `SELECT topic_id, passing_score,difficulty, xp_reward, max_attempts_per_day
        FROM quizzes WHERE id = $1`,
@@ -646,13 +655,28 @@ exports.submitQuiz = async (req, res) => {
     const passed = score >= passing_score;
 
     // 6️⃣ Save attempt
-    await pool.query(
-      `INSERT INTO user_quiz_attempts 
-       (user_id, topic_id, quiz_id, score, passed, time_spent_seconds)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [user_id, topic_id, quiz_id, score, passed, time_spent]
-    );
-
+   await pool.query(
+  `INSERT INTO user_quiz_attempts 
+   (
+     user_id,
+     topic_id,
+     quiz_id,
+     score,
+     passed,
+     time_spent_seconds,
+     started_at,
+     submitted_at
+   )
+   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,[
+  user_id,
+  topic_id,
+  quiz_id,
+  score,
+  passed,
+  time_spent,
+  startedAt,
+  submittedAt
+]);
     // 7️⃣ Upsert progress
     await pool.query(
       `INSERT INTO user_quiz_progress

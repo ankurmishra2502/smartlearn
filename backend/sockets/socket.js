@@ -225,15 +225,16 @@ if (!participantCheck.rows.length) {
               senderType: "ai",
               message: aiResponse
             });
-         const feedRes = await pool.query(
+        const feedRes = await pool.query(
   `
   INSERT INTO host_ai_feed (
     room_id,
     host_id,
     prompt,
-    response
+    response,
+    chat_date
   )
-  VALUES ($1,$2,$3,$4)
+  VALUES ($1,$2,$3,$4,CURRENT_DATE)
   RETURNING *
   `,
   [
