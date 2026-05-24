@@ -18,6 +18,7 @@ const teacherHomeworkRoutes = require("./routes/teacherHomeworkRoutes");
 const studentHomeworkRoutes = require("./routes/studentHomeworkRoutes");
 const leaderboardRoutes = require("./routes/leaderboardRoutes");
 const statsRoutes = require("./routes/statsRoutes");
+const certificateRoutes = require("./routes/certificateRoutes");
 const { Server } = require("net");
 const app = express();
 
@@ -27,35 +28,37 @@ const app = express();
 const allowedOrigins = [
   "http://localhost:5173", // frontend
   "http://localhost:5000", // backend (optional)
-  "https://ed-tech-mocha.vercel.app" // production frontend
+  "https://ed-tech-mocha.vercel.app", // production frontend
+  "https://mastishq.vandanpatel.in/"
 ];
 
-app.use(
-  cors({
-    origin: "*",
-    credentials: true
-  })
-);
+// app.use(
+//   cors({
+//     origin: "*",
+//     credentials: true
+//   })
+// );
 
-// app.use(cors({
-//   origin: function (origin, callback) {
+app.use(cors({
+  origin: function (origin, callback) {
 
-//     // Allow Postman / curl (no origin)
-//     if (!origin) return callback(null, true);
+    // Allow Postman / curl (no origin)
+    if (!origin) return callback(null, true);
 
-//     if (allowedOrigins.includes(origin)) {
-//       return callback(null, true);
-//     }
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
 
-//     return callback(new Error("Not allowed by CORS"));
-//   },
+    return callback(new Error("Not allowed by CORS"));
+  },
 
-//   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
 
-//   allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: ["Content-Type", "Authorization"],
 
-//   credentials: true
-// }));
+  credentials: true
+}));
+
 app.use(express.json());
 app.use("/api", require("./routes/teacherRoutes"));
 app.use("/auth", authRoutes);
@@ -69,6 +72,7 @@ app.use("/teacher", teacherHomeworkRoutes);
 app.use("/student", studentHomeworkRoutes);
 app.use("/leaderboard", leaderboardRoutes);
 app.use("/stats", statsRoutes);
+app.use("/certificates", certificateRoutes);
 app.get("/", (req, res) => {
   res.send("Server running");
 });
