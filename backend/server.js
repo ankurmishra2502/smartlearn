@@ -19,6 +19,8 @@ const studentHomeworkRoutes = require("./routes/studentHomeworkRoutes");
 const leaderboardRoutes = require("./routes/leaderboardRoutes");
 const statsRoutes = require("./routes/statsRoutes");
 const certificateRoutes = require("./routes/certificateRoutes");
+const pinMessageRoutes = require("./routes/pinMessageRoutes");
+const academicRoutes = require("./routes/academicRoutes");
 const { Server } = require("net");
 const app = express();
 
@@ -66,6 +68,7 @@ app.use("/user", userRoutes);
 app.use("/course", CourseRoutes);
 app.use("/xp", xpRoutes);
 app.use("/progress", progressRoutes);
+app.use("/academic", academicRoutes);
 app.use("/ai", aiRoutes);
 app.use("/room", roomRoutes);
 app.use("/teacher", teacherHomeworkRoutes);
@@ -73,6 +76,7 @@ app.use("/student", studentHomeworkRoutes);
 app.use("/leaderboard", leaderboardRoutes);
 app.use("/stats", statsRoutes);
 app.use("/certificates", certificateRoutes);
+app.use("/message", pinMessageRoutes);
 app.get("/", (req, res) => {
   res.send("Server running");
 });
