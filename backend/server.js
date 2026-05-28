@@ -21,6 +21,8 @@ const statsRoutes = require("./routes/statsRoutes");
 const certificateRoutes = require("./routes/certificateRoutes");
 const pinMessageRoutes = require("./routes/pinMessageRoutes");
 const academicRoutes = require("./routes/academicRoutes");
+const teacherAlertRoutes = require("./routes/teacherAlertRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
 const { Server } = require("net");
 const app = express();
 
@@ -77,6 +79,8 @@ app.use("/leaderboard", leaderboardRoutes);
 app.use("/stats", statsRoutes);
 app.use("/certificates", certificateRoutes);
 app.use("/message", pinMessageRoutes);
+app.use("/alerts", teacherAlertRoutes);
+app.use("/notifications", notificationRoutes);
 app.get("/", (req, res) => {
   res.send("Server running");
 });
