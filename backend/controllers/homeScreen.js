@@ -1,8 +1,11 @@
 const pool = require("../config/db");
 const {
-  getCertificatesService,
-}= require("../services/CertificateService");
-const {getStatsAnalyticsService } = require("../services/StatsService");
+  getCertificateService,
+} = require("../services/certificateService");
+
+const {
+  getStatsAnalyticsService,
+} = require("../services/statsService");
 
 exports.getStudentDashboardOverview = async (
   req,
