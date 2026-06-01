@@ -20,4 +20,11 @@ router.get(
 );
 
 
+router.get(
+  "/teacher-pinned-messages",
+  authMiddleware,
+  pinnedMessageController.getTeacherPinnedMessages
+);
+
+
 module.exports = router;

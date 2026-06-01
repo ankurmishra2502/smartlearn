@@ -155,6 +155,55 @@ exports.getStudentPinnedMessages = async (req, res) => {
 };
 
 
+exports.getTeacherPinnedMessages = async (req, res) => {
+  try {
+    if (!req.teacher) {
+      return res.status(403).json({
+        success: false,
+        message: "Teacher access required",
+      });
+    }
+
+    const teacherId = req.teacher.teacherId;
+
+    const result = await pool.query(
+      `
+      SELECT
+        id,
+        title,
+        message,
+        is_active,
+        created_at,
+        updated_at
+      FROM teacher_pinned_messages
+      WHERE teacher_id = $1
+      ORDER BY created_at DESC
+      `,
+      [teacherId]
+    );
+
+    return res.status(200).json({
+      success: true,
+      count: result.rows.length,
+      data: result.rows,
+    });
+
+  } catch (error) {
+    console.error(
+      "getTeacherPinnedMessages error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+
+
+
 // exports.getStudentPinnedMessages = async (req, res) => {
 //   try {
 //     if (!req.user) {

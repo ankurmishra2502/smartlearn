@@ -23,6 +23,7 @@ const pinMessageRoutes = require("./routes/pinMessageRoutes");
 const academicRoutes = require("./routes/academicRoutes");
 const teacherAlertRoutes = require("./routes/teacherAlertRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
+const teacherAnalyticsRoutes = require("./routes/teacherAnalyticsRoutes");
 const { Server } = require("net");
 const app = express();
 
@@ -33,7 +34,10 @@ const allowedOrigins = [
   "http://localhost:5173", // frontend
   "http://localhost:5000", // backend (optional)
   "https://ed-tech-mocha.vercel.app", // production frontend
-  "https://mastishq.vandanpatel.in/"
+  "https://mastishq.vandanpatel.in",
+  "https://mastishq.vandanpatel.in/",
+  "http://mastishq.vandanpatel.in",
+  "https://www.mastishq.vandanpatel.in"
 ];
 
 // app.use(
@@ -81,6 +85,7 @@ app.use("/certificates", certificateRoutes);
 app.use("/message", pinMessageRoutes);
 app.use("/alerts", teacherAlertRoutes);
 app.use("/notifications", notificationRoutes);
+app.use("/analytics", teacherAnalyticsRoutes);
 app.get("/", (req, res) => {
   res.send("Server running");
 });

@@ -10,7 +10,7 @@ exports.createTeacher = async (req, res) => {
 
   try {
     console.log("Received data for new teacher:", req.body);
-    const { first_name, last_name, email, mobile_number } = req.body;
+    const { first_name, last_name, email, mobile_number, classes =[], subject =[]} = req.body;
 
     console.log("Incoming data:", req.body);
 
@@ -22,10 +22,10 @@ exports.createTeacher = async (req, res) => {
 
     const teacher = await pool.query(
       `INSERT INTO teachers
-       (first_name,last_name,email,mobile_number,password)
-       VALUES ($1,$2,$3,$4,$5)
+       (first_name,last_name,email,mobile_number,password,classes, subjects)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
        RETURNING *`,
-      [first_name,last_name,email,mobile_number,hashedPassword]
+      [first_name,last_name,email,mobile_number,hashedPassword,classes,subject]
     );
 
     
