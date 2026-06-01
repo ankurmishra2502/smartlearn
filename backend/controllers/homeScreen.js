@@ -1,11 +1,6 @@
 const pool = require("../config/db");
-const {
-  getCertificateService,
-} = require("../services/certificateService");
-
-const {
-  getStatsAnalyticsService,
-} = require("../services/statsService");
+const certificateService = require("../services/certificateService");
+const statsService = require("../services/statsService");
 
 exports.getStudentDashboardOverview = async (
   req,
@@ -160,7 +155,7 @@ exports.getStudentDashboardOverview = async (
     */
 
     const certificateData =
-      await getCertificatesService(
+      await certificateService.getCertificatesService(
         userId
       );
 
@@ -206,7 +201,7 @@ exports.getStudentDashboardOverview = async (
     */
 
     const analytics =
-      await getStatsAnalyticsService(
+      await statsService.getStatsAnalyticsService(
         userId
       );
 
