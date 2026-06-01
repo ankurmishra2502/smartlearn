@@ -1,100 +1,283 @@
 const pool = require("../config/db");
+const {
+  getCertificatesService,
+}= require("../services/CertificateService");
+const {getStatsAnalyticsService } = require("../services/StatsService");
 
-const getRecommendedTopics = async (userId) => {
-  const query = `
-    SELECT 
-      t.id AS topic_id,
-      t.name AS topic_name,
-      s.name AS subject_name
-    FROM topics t
-    JOIN subjects s ON t.subject_id = s.id
-    ORDER BY RANDOM()
-    LIMIT 4;
-  `;
-
-  const { rows } = await pool.query(query);
-  return rows;
-};
-
-exports.getContinueLearning = async (req, res) => {
+exports.getStudentDashboardOverview = async (
+  req,
+  res
+) => {
   try {
-    const userId = req.user.userId;
-
-    const query = `
-      SELECT 
-        utp.topic_id,
-        t.name AS topic_name,
-        s.name AS subject_name,
-        utp.progress_percent,
-        utp.last_accessed_at
-      FROM user_topic_progress utp
-      JOIN topics t ON utp.topic_id = t.id
-      JOIN subjects s ON t.subject_id = s.id
-      WHERE utp.user_id = $1
-      AND utp.is_completed = FALSE
-      ORDER BY utp.last_accessed_at DESC
-      LIMIT 4;
-    `;
-
-    const { rows } = await pool.query(query, [userId]);
-
-    // 🧠 CASE 3: First-time user
-    if (rows.length === 0) {
-      const recommended = await getRecommendedTopics(userId);
-
-      return res.json({
-        latest: null,
-        continue_learning: [],
-        recommended
+    if (!req.user) {
+      return res.status(403).json({
+        success: false,
+        message: "Student access required",
       });
     }
 
-    // 🧠 Split latest + grid
-    const latest = rows[0];
-    const continueLearning = rows.slice(1, 4);
-
-    return res.json({
-      latest,
-      continue_learning: continueLearning
-    });
-
-  } catch (error) {
-    console.error("Home API Error:", error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-};
-
-exports.updateTopicProgress = async (req, res) => {
-  try {
-    const { topic_id, progress_percent } = req.body;
     const userId = req.user.userId;
 
-    const isCompleted = progress_percent >= 100;
+    /*
+    =========================================
+    1. CONTINUE LEARNING
+    subject wise progress from user_quiz_progress
+    =========================================
+    */
 
-    const query = `
-      INSERT INTO user_topic_progress (
-        user_id, topic_id, progress_percent, last_accessed_at, is_completed, updated_at
+    const continueLearningResult =
+      await pool.query(
+        `
+        SELECT
+          s.id AS subject_id,
+          s.name AS subject_name,
+          s.icon,
+
+          ROUND(
+            AVG(
+              COALESCE(uqp.latest_score, 0)
+            )
+          ) AS progress_percent
+
+        FROM subjects s
+
+        INNER JOIN topics t
+          ON t.subject_id = s.id
+
+        INNER JOIN user_quiz_progress uqp
+          ON uqp.topic_id = t.id
+
+        WHERE
+          uqp.user_id = $1
+
+        GROUP BY
+          s.id,
+          s.name,
+          s.icon
+
+        ORDER BY s.name ASC
+      `,
+        [userId]
+      );
+
+    const continueLearning =
+      continueLearningResult.rows.map(
+        (row) => ({
+          subject_id: row.subject_id,
+          subject_name:
+            row.subject_name,
+          icon: row.icon,
+          progress_percent: Number(
+            row.progress_percent || 0
+          ),
+        })
+      );
+
+    /*
+    =========================================
+    2. COURSES COMPLETED
+    if all quizzes of all topics in subject passed
+    subject completed
+    =========================================
+    */
+
+    const subjectsResult =
+      await pool.query(`
+      SELECT id, name
+      FROM subjects
+      ORDER BY name ASC
+    `);
+
+    let coursesCompleted = 0;
+
+    for (const subject of subjectsResult.rows) {
+      const topicResult =
+        await pool.query(
+          `
+          SELECT id
+          FROM topics
+          WHERE subject_id = $1
+        `,
+          [subject.id]
+        );
+
+      let subjectCompleted = true;
+
+      for (const topic of topicResult.rows) {
+        const topicCheck =
+          await pool.query(
+            `
+            SELECT
+              COUNT(q.id) AS total,
+
+              COUNT(
+                DISTINCT CASE
+                  WHEN uqp.passed = true
+                  THEN uqp.quiz_id
+                END
+              ) AS passed
+
+            FROM quizzes q
+
+            LEFT JOIN user_quiz_progress uqp
+              ON q.id = uqp.quiz_id
+              AND uqp.user_id = $2
+
+            WHERE q.topic_id = $1
+          `,
+            [topic.id, userId]
+          );
+
+        const total = parseInt(
+          topicCheck.rows[0].total || 0
+        );
+
+        const passed = parseInt(
+          topicCheck.rows[0].passed || 0
+        );
+
+        if (
+          total === 0 ||
+          total !== passed
+        ) {
+          subjectCompleted = false;
+          break;
+        }
+      }
+
+      if (subjectCompleted) {
+        coursesCompleted++;
+      }
+    }
+
+    /*
+    =========================================
+    3. CERTIFICATES
+    =========================================
+    */
+
+    const certificateData =
+      await getCertificatesService(
+        userId
+      );
+
+    const certificatesEarned =
+      certificateData?.summary
+        ?.certified || 0;
+
+    /*
+    =========================================
+    4. GLOBAL RANK
+    =========================================
+    */
+
+    const rankResult =
+      await pool.query(
+        `
+      WITH ranked AS (
+        SELECT
+          u.id,
+          RANK() OVER (
+            ORDER BY us.total_xp DESC
+          ) AS current_rank
+        FROM user_stats us
+        JOIN users u
+          ON u.id = us.user_id
       )
-      VALUES ($1, $2, $3, NOW(), $4, NOW())
-      ON CONFLICT (user_id, topic_id)
-      DO UPDATE SET
-        progress_percent = EXCLUDED.progress_percent,
-        last_accessed_at = NOW(),
-        is_completed = EXCLUDED.is_completed,
-        updated_at = NOW();
-    `;
+      SELECT current_rank
+      FROM ranked
+      WHERE id = $1
+      `,
+        [userId]
+      );
 
-    await pool.query(query, [
-      userId,
-      topic_id,
-      progress_percent,
-      isCompleted
-    ]);
+    const globalRank = Number(
+      rankResult.rows[0]
+        ?.current_rank || 0
+    );
 
-    res.json({ message: "Progress updated" });
+    /*
+    =========================================
+    5. COGNITIVE
+    =========================================
+    */
 
+    const analytics =
+      await getStatsAnalyticsService(
+        userId
+      );
+
+    const efficiency =
+      analytics?.key_metrics
+        ?.accuracy || 0;
+
+    /*
+    =========================================
+    HOURS LEARNED
+    from user_quiz_attempts
+    =========================================
+    */
+
+    const studyTimeResult =
+      await pool.query(
+        `
+        SELECT
+          COALESCE(
+            SUM(time_spent_seconds),
+            0
+          ) AS total_seconds
+        FROM user_quiz_attempts
+        WHERE user_id = $1
+      `,
+        [userId]
+      );
+
+    const totalSeconds = Number(
+      studyTimeResult.rows[0]
+        ?.total_seconds || 0
+    );
+
+    const hoursLearned = (
+      totalSeconds / 3600
+    ).toFixed(1);
+
+    /*
+    =========================================
+    RESPONSE
+    =========================================
+    */
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        continue_learning:
+          continueLearning,
+
+        progress_summary: {
+          courses_completed:
+            coursesCompleted,
+          certificates_earned:
+            certificatesEarned,
+          global_rank: globalRank,
+        },
+
+        cognitive_metrics: {
+          efficiency,
+          hours_learned:
+            Number(hoursLearned),
+        },
+      },
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Internal Server Error" });
+    console.error(
+      "getStudentDashboardOverview error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        "Internal server error",
+    });
   }
 };
