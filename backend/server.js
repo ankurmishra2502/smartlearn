@@ -40,7 +40,9 @@ const allowedOrigins = [
   "http://mastishq.vandanpatel.in",
   "https://www.mastishq.vandanpatel.in",
   "mastishq.vandanpatel.in",
-  "www.mastishq.vandanpatel.in"
+  "www.mastishq.vandanpatel.in",
+  "https://mastishq.ai",
+  "https://www.mastishq.ai"
 ];
 
 // app.use(
