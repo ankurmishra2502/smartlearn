@@ -204,6 +204,7 @@ exports.getTeacherAlerts = async (req, res) => {
           days_inactive: Number(row.days_inactive),
           last_active_date: row.last_active_date,
           is_reminded: remindedSet.has(key),
+          is_dismissed: dismissedSet.has(key),
           quiz_id: null,
         };
       })
@@ -239,6 +240,7 @@ exports.getTeacherAlerts = async (req, res) => {
             Number(row.failed_attempt_count),
           last_attempt_date: row.last_attempt_date,
           is_reminded: remindedSet.has(key),
+          is_dismissed: dismissedSet.has(key),
         };
       })
       .filter(

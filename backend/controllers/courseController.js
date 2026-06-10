@@ -186,28 +186,33 @@ exports.getQuizByTopicId = async (req, res) => {
     // const user_id = req.user.userId; // important
     const { topic_id } = req.params;
 
-    const result = await pool.query(
-      `SELECT 
-         q.id,
-         q.title,
-         q.difficulty,
-         q.passing_score,
-         q.xp_reward,
-         q.max_attempts_per_day,
-         COALESCE(p.passed, false) as passed,
-         COALESCE(p.total_attempts, 0) as total_attempts
-       FROM quizzes q
-       LEFT JOIN user_quiz_progress p
-         ON q.id = p.quiz_id
-       WHERE q.topic_id = $1
-       ORDER BY 
-         CASE q.difficulty
-           WHEN 'easy' THEN 1
-           WHEN 'medium' THEN 2
-           WHEN 'hard' THEN 3
-         END`,
-      [ topic_id]
-    );
+    const user_id = req.user.userId;
+
+const result = await pool.query(
+`
+SELECT
+    q.id,
+    q.title,
+    q.difficulty,
+    q.passing_score,
+    q.xp_reward,
+    q.max_attempts_per_day,
+    COALESCE(p.passed,false) AS passed,
+    COALESCE(p.total_attempts,0) AS total_attempts
+FROM quizzes q
+LEFT JOIN user_quiz_progress p
+    ON q.id = p.quiz_id
+   AND p.user_id = $2
+WHERE q.topic_id = $1
+ORDER BY
+CASE q.difficulty
+    WHEN 'easy' THEN 1
+    WHEN 'medium' THEN 2
+    WHEN 'hard' THEN 3
+END
+`,
+[topic_id, user_id]
+);
 
     res.json(result.rows);
 

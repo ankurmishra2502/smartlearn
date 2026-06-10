@@ -17,7 +17,7 @@ router.post("/quiz/check-answer", controller.checkAnswer);
 router.get("/subjects", controller.getSubjects);
 router.get("/topics/:subject_id", controller.getTopicsBySubject);
 router.get("/video/:topic_id", controller.getVideoByTopicId);
-router.get("/quiz/:topic_id", controller.getQuizByTopicId);
+router.get("/quiz/:topic_id", auth, controller.getQuizByTopicId);
 router.get("/question/:quiz_id", controller.getQuestionByQuizId);
 router.get("/status/:topic_id", auth, controller.getRemainingAttempts);
 
