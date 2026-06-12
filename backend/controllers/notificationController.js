@@ -179,3 +179,264 @@ exports.markNotificationRead = async (req, res) => {
     });
   }
 };
+
+exports.acceptInvite = async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const notificationId = req.params.notificationId;
+    const userId = req.user.userId;
+
+    console.log("notificationId:", notificationId);
+    console.log("userId:", userId);
+
+    await client.query("BEGIN");
+
+    // Fetch invitation
+    const notification = await client.query(
+      `
+      SELECT *
+      FROM student_notifications
+      WHERE
+        id = $1
+        AND user_id = $2
+        AND type = 'study_room_invite'
+      FOR UPDATE
+      `,
+      [notificationId, userId]
+    );
+
+    if (notification.rows.length === 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        success: false,
+        message: "Invitation not found",
+      });
+    }
+
+    const invite = notification.rows[0];
+
+    if (invite.status === "accepted") {
+      await client.query("ROLLBACK");
+
+      return res.status(200).json({
+        success: true,
+        message: "Invitation already accepted",
+      });
+    }
+
+    if (invite.status === "rejected") {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        success: false,
+        message: "Invitation already rejected",
+      });
+    }
+
+    // Check room exists
+    const room = await client.query(
+      `
+      SELECT id,is_active,max_learners
+      FROM study_rooms
+      WHERE id=$1
+      `,
+      [invite.reference_id]
+    );
+
+    if (room.rows.length === 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        success: false,
+        message: "Room not found",
+      });
+    }
+
+    if (!room.rows[0].is_active) {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        success: false,
+        message: "Room is no longer active",
+      });
+    }
+
+    // Check room capacity
+    const count = await client.query(
+      `
+      SELECT COUNT(*)::int AS learners
+      FROM room_participants
+      WHERE room_id=$1
+      `,
+      [invite.reference_id]
+    );
+
+    if (
+      room.rows[0].max_learners &&
+      count.rows[0].learners >= room.rows[0].max_learners
+    ) {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        success: false,
+        message: "Room is full",
+      });
+    }
+
+    // Already participant?
+    const exists = await client.query(
+      `
+      SELECT 1
+      FROM room_participants
+      WHERE room_id=$1
+      AND user_id=$2
+      `,
+      [invite.reference_id, userId]
+    );
+
+    if (exists.rows.length === 0) {
+      await client.query(
+        `
+        INSERT INTO room_participants
+        (
+          room_id,
+          user_id
+        )
+        VALUES
+        (
+          $1,
+          $2
+        )
+        `,
+        [invite.reference_id, userId]
+      );
+    }
+
+    // Mark notification accepted
+    await client.query(
+      `
+      UPDATE student_notifications
+      SET
+        status='accepted',
+        is_read=true,
+        updated_at=NOW()
+      WHERE id=$1
+      `,
+      [notificationId]
+    );
+
+    await client.query("COMMIT");
+
+    return res.status(200).json({
+      success: true,
+      message: "Joined successfully",
+      roomId: invite.reference_id,
+    });
+
+  } catch (err) {
+
+    await client.query("ROLLBACK");
+
+    console.error(err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to accept invitation",
+    });
+
+  } finally {
+
+    client.release();
+
+  }
+};
+
+exports.rejectInvite = async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const notificationId = req.params.notificationId;
+    const userId = req.user.userId;
+
+    await client.query("BEGIN");
+
+    const notification = await client.query(
+      `
+      SELECT *
+      FROM student_notifications
+      WHERE
+        id=$1
+        AND user_id=$2
+        AND type='study_room_invite'
+      FOR UPDATE
+      `,
+      [notificationId, userId]
+    );
+
+    if (notification.rows.length === 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        success: false,
+        message: "Invitation not found",
+      });
+    }
+
+    const invite = notification.rows[0];
+
+    if (invite.status === "accepted") {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        success: false,
+        message: "Invitation already accepted",
+      });
+    }
+
+    if (invite.status === "rejected") {
+      await client.query("ROLLBACK");
+
+      return res.status(200).json({
+        success: true,
+        message: "Invitation already rejected",
+      });
+    }
+
+    await client.query(
+      `
+      UPDATE student_notifications
+      SET
+        status='rejected',
+        is_read=true,
+        updated_at=NOW()
+      WHERE id=$1
+      `,
+      [notificationId]
+    );
+
+    await client.query("COMMIT");
+
+    return res.status(200).json({
+      success: true,
+      message: "Invitation rejected",
+    });
+
+  } catch (err) {
+
+    await client.query("ROLLBACK");
+
+    console.error(err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to reject invitation",
+    });
+
+  } finally {
+
+    client.release();
+
+  }
+};

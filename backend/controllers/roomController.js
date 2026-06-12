@@ -530,3 +530,231 @@ exports.getDiscoverRooms = async (req, res) => {
     });
   }
 };
+
+exports.getInviteUsers = async (req, res) => {
+  try {
+    const roomId = req.params.id;
+    const hostId = req.user.userId;
+
+    // Check room exists and requester is host
+    const room = await pool.query(
+      `
+      SELECT id, host_id
+      FROM study_rooms
+      WHERE id = $1
+      `,
+      [roomId]
+    );
+
+    if (room.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Room not found",
+      });
+    }
+
+    if (room.rows[0].host_id !== hostId) {
+      return res.status(403).json({
+        success: false,
+        message: "Only host can invite learners",
+      });
+    }
+
+    // Fetch eligible users
+    const users = await pool.query(
+      `
+      SELECT
+    u.id,
+    u.first_name,
+    u.last_name,
+    u.profile_picture
+FROM users u
+WHERE
+    u.role = 'student'
+    AND u.id::text <> $2
+    AND NOT EXISTS (
+        SELECT 1
+        FROM room_participants rp
+        WHERE rp.room_id = $1
+          AND rp.user_id = u.id::text
+    )
+    AND NOT EXISTS (
+        SELECT 1
+        FROM student_notifications sn
+        WHERE sn.reference_id = $1
+          AND sn.type = 'study_room_invite'
+          AND sn.status = 'pending'
+          AND sn.user_id = u.id
+    )
+ORDER BY
+    u.first_name,
+    u.last_name;
+      `,
+      [roomId, hostId]
+    );
+
+    return res.status(200).json({
+      success: true,
+      count: users.rows.length,
+      data: users.rows,
+    });
+
+  } catch (err) {
+    console.error(err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch users",
+    });
+  }
+};
+
+
+
+exports.inviteUser = async (req, res) => {
+  try {
+    const roomId = req.params.id;
+    const hostId = req.user.userId;
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "userId is required",
+      });
+    }
+
+    // Check room
+    const room = await pool.query(
+      `
+      SELECT id, host_id, topic
+      FROM study_rooms
+      WHERE id=$1
+      `,
+      [roomId]
+    );
+
+    if (room.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Room not found",
+      });
+    }
+
+    // Only host can invite
+    if (room.rows[0].host_id !== hostId) {
+      return res.status(403).json({
+        success: false,
+        message: "Only host can invite learners",
+      });
+    }
+
+    // Cannot invite yourself
+    if (hostId === userId) {
+      return res.status(400).json({
+        success: false,
+        message: "You cannot invite yourself",
+      });
+    }
+
+    // Check user exists
+    const user = await pool.query(
+      `
+      SELECT id
+      FROM users
+      WHERE id=$1
+      `,
+      [userId]
+    );
+
+    if (user.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // Already participant?
+    const participant = await pool.query(
+      `
+      SELECT 1
+      FROM room_participants
+      WHERE room_id=$1
+      AND user_id=$2
+      `,
+      [roomId, userId]
+    );
+
+    if (participant.rows.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "User already joined this room",
+      });
+    }
+
+    // Pending invite exists?
+    const pending = await pool.query(
+      `
+      SELECT 1
+      FROM student_notifications
+      WHERE
+          user_id=$1
+      AND reference_id=$2
+      AND type='study_room_invite'
+      AND status='pending'
+      `,
+      [userId, roomId]
+    );
+
+    if (pending.rows.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invitation already sent",
+      });
+    }
+
+    // Create notification
+await pool.query(
+`
+INSERT INTO student_notifications
+(
+    user_id,
+    type,
+    title,
+    message,
+    reference_id,
+    is_read,
+    status
+)
+VALUES
+(
+    $1,
+    'study_room_invite',
+    'Study Room Invitation',
+    $2,
+    $3,
+    false,
+    'pending'
+)
+`,
+[
+    userId,
+    `You have been invited to join "${room.rows[0].topic}" study room.`,
+    roomId
+]
+);
+
+    return res.status(200).json({
+      success: true,
+      message: "Invitation sent successfully",
+    });
+
+  } catch (err) {
+    console.error(err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to send invitation",
+    });
+  }
+};

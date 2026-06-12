@@ -16,4 +16,16 @@ router.patch(
   notificationController.markNotificationRead
 );
 
+router.post(
+  "/:notificationId/accept-invite",
+  authMiddleware,
+  notificationController.acceptInvite
+);
+
+router.post(
+  "/:notificationId/reject-invite",
+  authMiddleware,
+  notificationController.rejectInvite
+);
+
 module.exports = router;
