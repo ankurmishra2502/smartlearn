@@ -5,6 +5,7 @@ const cors = require("cors");
 const http = require("http");
 const { initSocket } = require("./sockets/socket");
 console.log("REDIS_URL:", process.env.REDIS_URL);
+console.log("OPENAI_API_KEY:", process.env.OPENAI_API_KEY);
 
 const authRoutes = require("./routes/authRoutes");
 const userRoutes = require("./routes/userRoutes");
