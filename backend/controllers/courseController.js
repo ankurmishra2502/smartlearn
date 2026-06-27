@@ -1261,8 +1261,7 @@ exports.generateAIQuiz = async (req, res) => {
       SELECT
           t.id,
           t.title,
-          t.description,
-          tv.transcript
+          t.description
       FROM topics t
       INNER JOIN topic_videos tv
           ON tv.topic_id = t.id
@@ -1280,12 +1279,7 @@ exports.generateAIQuiz = async (req, res) => {
 
     const topic = topicResult.rows[0];
 
-    if (!topic.transcript || topic.transcript.trim() === "") {
-      return res.status(400).json({
-        success: false,
-        message: "Transcript not available.",
-      });
-    }
+    
 
     // ============================
     // Generate Questions
@@ -1294,7 +1288,6 @@ exports.generateAIQuiz = async (req, res) => {
     const questions = await openAIQuizService.generateQuiz({
       title: topic.title,
       description: topic.description,
-      transcript: topic.transcript,
       easy: easy || 5,
       medium: medium || 5,
       hard: hard || 5,

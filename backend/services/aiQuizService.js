@@ -1,7 +1,7 @@
 const pool = require("../config/db");
 const { extractVideoId } = require("./youtubelinkService");
 const { getYoutubeVideoDetails } = require("./youtubeServices");
-const { getTranscript } = require("./youtubeTranscript");
+//const { getTranscript } = require("./youtubeTranscript");
 /**
  * Create AI Topic
  */
@@ -45,7 +45,7 @@ exports.createAITopic = async ({
 
     //const video = await getYoutubeVideoDetails(youtube_video_id);
 
-    const transcript = await getTranscript(youtube_url);
+    //const transcript = await getTranscript(youtube_url);
     // ===========================
     // Generate Order Index
     // ===========================
@@ -100,17 +100,15 @@ exports.createAITopic = async ({
           topic_id,
           youtube_video_id,
           youtube_url,
-          transcript,
           duration
       )
-      VALUES ($1,$2,$3,$4,$5)
+      VALUES ($1,$2,$3,$4)
       RETURNING *
       `,
       [
         topic.id,
         youtube_video_id,
         youtube_url,
-        transcript,
         100
       ]
     );

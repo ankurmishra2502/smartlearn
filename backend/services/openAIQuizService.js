@@ -32,11 +32,7 @@ TEACHER DESCRIPTION
 
 ${description}
 
-==========================
-VIDEO TRANSCRIPT
-==========================
 
-${transcript}
 
 ==========================
 QUESTION REQUIREMENTS
@@ -95,7 +91,7 @@ RULES
 
 2. Don't use outside knowledge.
 
-3. Questions must come only from transcript and description.
+3. Questions must come only from topic and description.
 
 4. Every question must have exactly 4 options.
 
