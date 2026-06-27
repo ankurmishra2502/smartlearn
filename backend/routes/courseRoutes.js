@@ -8,6 +8,9 @@ router.post("/admin/topic", controller.createTopic);
 router.post("/admin/video", controller.addVideo);
 router.post("/admin/quiz", controller.createQuiz);
 router.post("/admin/question", controller.addQuestion);
+router.post("/topic", auth, controller.createAITopic);
+router.post("/generate",auth, controller.generateAIQuiz);
+router.post("/publish", auth, controller.publishAIQuiz);
 
 router.post("/quiz/:quiz_id/submit",auth, controller.submitQuiz);
 

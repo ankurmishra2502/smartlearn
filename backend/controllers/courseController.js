@@ -1,6 +1,9 @@
 const pool = require("../config/db");
 const xpService = require("../services/xpService");
 const { updateSubjectStreak } = require("../services/streakService"); 
+const openAIQuizService = require("../services/openAIQuizService");
+const publishQuizService = require("../services/publishQuizService");
+
 // =========================
 // 📘 SUBJECT CONTROLLERS
 // =========================
@@ -1176,5 +1179,209 @@ exports.getRemainingAttempts = async (req, res) => {
 
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+};
+
+const aiQuizService = require("../services/aiQuizService");
+
+/**
+ * Create AI Topic + Save YouTube Video
+ */
+exports.createAITopic = async (req, res) => {
+  try {
+    if (!req.teacher) {
+      return res.status(403).json({
+        success: false,
+        message: "Teacher access required",
+      });
+    }
+
+
+    const {
+      subject_id,
+      title,
+      description,
+      difficulty,
+      youtube_url,
+    } = req.body;
+
+    const result = await aiQuizService.createAITopic({
+      subject_id,
+      title,
+      description,
+      difficulty,
+      youtube_url,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Topic created successfully.",
+      data: result,
+    });
+
+  } catch (err) {
+    console.error("Create AI Topic Controller Error:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: err.message || "Something went wrong.",
+    });
+  }
+};
+
+
+exports.generateAIQuiz = async (req, res) => {
+  try {
+    if (!req.teacher) {
+      return res.status(403).json({
+        success: false,
+        message: "Teacher access required",
+      });
+    }
+
+    const { topic_id, easy, medium, hard } = req.body;
+
+    // ============================
+    // Validation
+    // ============================
+
+    if (!topic_id) {
+      return res.status(400).json({
+        success: false,
+        message: "Topic ID is required.",
+      });
+    }
+
+    // ============================
+    // Fetch Topic
+    // ============================
+
+    const topicResult = await pool.query(
+      `
+      SELECT
+          t.id,
+          t.title,
+          t.description,
+          tv.transcript
+      FROM topics t
+      INNER JOIN topic_videos tv
+          ON tv.topic_id = t.id
+      WHERE t.id = $1
+      `,
+      [topic_id]
+    );
+
+    if (topicResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Topic not found.",
+      });
+    }
+
+    const topic = topicResult.rows[0];
+
+    if (!topic.transcript || topic.transcript.trim() === "") {
+      return res.status(400).json({
+        success: false,
+        message: "Transcript not available.",
+      });
+    }
+
+    // ============================
+    // Generate Questions
+    // ============================
+
+    const questions = await openAIQuizService.generateQuiz({
+      title: topic.title,
+      description: topic.description,
+      transcript: topic.transcript,
+      easy: easy || 5,
+      medium: medium || 5,
+      hard: hard || 5,
+    });
+
+    return res.status(200).json({
+      success: true,
+      topic: {
+        id: topic.id,
+        title: topic.title,
+      },
+      questions,
+    });
+
+  } catch (err) {
+
+    console.error("Generate AI Quiz:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: err.message || "AI quiz generation failed.",
+    });
+
+  }
+};
+
+
+exports.publishAIQuiz = async (req, res) => {
+  try {
+    if (!req.teacher) {
+      return res.status(403).json({
+        success: false,
+        message: "Teacher access required",
+      });
+    }
+
+    const { topic_id, questions } = req.body;
+
+
+    console.log("Publish AI Quiz Request:", { topic_id, questions });
+    // ============================
+    // Validation
+    // ============================
+
+    if (!topic_id) {
+      return res.status(400).json({
+        success: false,
+        message: "Topic ID is required.",
+      });
+    }
+
+    if (!questions) {
+      return res.status(400).json({
+        success: false,
+        message: "Questions are required.",
+      });
+    }
+
+    const totalQuestions =
+      (questions.easy?.length || 0) +
+      (questions.medium?.length || 0) +
+      (questions.hard?.length || 0);
+
+    if (totalQuestions === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No questions found to publish.",
+      });
+    }
+
+    const quizzes = await publishQuizService.publishQuiz({
+      topic_id,
+      questions,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Quiz published successfully.",
+      data: quizzes,
+    });
+
+  } catch (err) {
+    console.error("Publish Quiz Error:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 };
