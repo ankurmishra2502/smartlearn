@@ -26,9 +26,9 @@ const teacherAlertRoutes = require("./routes/teacherAlertRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const teacherAnalyticsRoutes = require("./routes/teacherAnalyticsRoutes");
 const homeScreenRoutes = require("./routes/homeScreenRoutes");
+const paymentRoutes = require("./routes/paymentRoutes");
 const { Server } = require("net");
 const app = express();
-
 
 
 
@@ -46,12 +46,12 @@ const allowedOrigins = [
   "https://www.mastishq.ai"
 ];
 
-// app.use(
-//   cors({
-//     origin: "*",
-//     credentials: true
-//   })
-// );
+app.use(
+  cors({
+    origin: "*",
+    credentials: true
+  })
+);
 
 app.use(cors({
   origin: function (origin, callback) {
@@ -93,6 +93,7 @@ app.use("/alerts", teacherAlertRoutes);
 app.use("/notifications", notificationRoutes);
 app.use("/analytics", teacherAnalyticsRoutes);
 app.use("/home", homeScreenRoutes);
+app.use("/payment", paymentRoutes);
 app.get("/", (req, res) => {
   res.send("Server running");
 });
