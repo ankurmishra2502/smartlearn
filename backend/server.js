@@ -46,12 +46,12 @@ const allowedOrigins = [
   "https://www.mastishq.ai"
 ];
 
-app.use(
-  cors({
-    origin: "*",
-    credentials: true
-  })
-);
+// app.use(
+//   cors({
+//     origin: "*",
+//     credentials: true
+//   })
+// );
 
 app.use(cors({
   origin: function (origin, callback) {
