@@ -35,5 +35,11 @@ router.get(
   onboardingController.getSubjects
 );
 
+router.post(
+  "/subjects/select",
+  authenticateV2,
+  onboardingController.selectSubjects
+);
+
 
 module.exports = router;

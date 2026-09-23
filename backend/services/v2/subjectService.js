@@ -399,6 +399,139 @@ const saveSubjectsForUser = async ({
   }
 };
 
+const selectUserSubjects = async ({
+  userId,
+  subjectIds,
+}) => {
+  const client = await pool.connect();
+
+  try {
+    if (!Array.isArray(subjectIds) || subjectIds.length === 0) {
+      throw new Error("SUBJECTS_REQUIRED");
+    }
+
+    // Remove duplicate IDs
+    const uniqueSubjectIds = [...new Set(subjectIds)];
+
+    await client.query("BEGIN");
+
+    /*
+     * Make sure every selected subject actually belongs
+     * to this user's AI-generated subject list.
+     */
+    const validationResult = await client.query(
+      `
+      SELECT
+        uas.ai_subject_id,
+        s.name,
+        s.description,
+        uas.display_order
+
+      FROM public.user_ai_subjects uas
+
+      JOIN public.ai_subjects s
+        ON s.id = uas.ai_subject_id
+
+      WHERE uas.user_id = $1
+        AND uas.is_active = TRUE
+        AND uas.ai_subject_id = ANY($2::uuid[])
+      `,
+      [userId, uniqueSubjectIds]
+    );
+
+    if (
+      validationResult.rows.length !== uniqueSubjectIds.length
+    ) {
+      throw new Error("INVALID_SUBJECT_SELECTION");
+    }
+
+    /*
+     * First unselect all generated subjects
+     * for this user.
+     */
+    await client.query(
+      `
+      UPDATE public.user_ai_subjects
+      SET
+        is_selected = FALSE,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE user_id = $1
+        AND is_active = TRUE
+      `,
+      [userId]
+    );
+
+    /*
+     * Select the subjects chosen by the user.
+     */
+    await client.query(
+      `
+      UPDATE public.user_ai_subjects
+      SET
+        is_selected = TRUE,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE user_id = $1
+        AND ai_subject_id = ANY($2::uuid[])
+        AND is_active = TRUE
+      `,
+      [userId, uniqueSubjectIds]
+    );
+
+    /*
+     * Now onboarding is complete.
+     */
+    await client.query(
+      `
+      UPDATE public.user_onboarding
+      SET
+        subjects_completed = TRUE,
+        current_step = 4,
+        completed_at = COALESCE(
+          completed_at,
+          CURRENT_TIMESTAMP
+        ),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE user_id = $1
+      `,
+      [userId]
+    );
+
+    await client.query(
+      `
+      UPDATE public.users
+      SET
+        is_onboarded = TRUE,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+      `,
+      [userId]
+    );
+
+    await client.query("COMMIT");
+
+    console.log(
+      `[SUBJECT SELECTION] User ${userId} selected ${uniqueSubjectIds.length} subjects`
+    );
+
+    return {
+      selectedSubjects: validationResult.rows,
+      count: uniqueSubjectIds.length,
+    };
+
+  } catch (error) {
+    await client.query("ROLLBACK");
+
+    console.error(
+      "[SUBJECT SELECTION ERROR]",
+      error
+    );
+
+    throw error;
+
+  } finally {
+    client.release();
+  }
+};
 
 // =====================================================
 // EXPORTS
@@ -411,4 +544,5 @@ module.exports = {
   getUserSubjects,
   getSubjectGenerationStatus,
     saveSubjectsForUser,
+    selectUserSubjects,
 };

@@ -351,3 +351,54 @@ exports.getSubjects = async (req, res) => {
     });
   }
 };
+
+exports.selectSubjects = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const { subjectIds } = req.body;
+
+    const result = await subjectService.selectUserSubjects({
+      userId,
+      subjectIds,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Subjects selected successfully",
+      selectedSubjects: result.selectedSubjects,
+      count: result.count,
+      isOnboarded: true,
+    });
+
+  } catch (error) {
+
+    console.error(
+      "SELECT SUBJECTS ERROR:",
+      error
+    );
+
+    if (error.message === "SUBJECTS_REQUIRED") {
+      return res.status(400).json({
+        success: false,
+        message: "Please select at least one subject",
+      });
+    }
+
+    if (
+      error.message ===
+      "INVALID_SUBJECT_SELECTION"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "One or more selected subjects are invalid",
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to select subjects",
+    });
+  }
+};
