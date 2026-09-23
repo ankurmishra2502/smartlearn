@@ -27,6 +27,12 @@ const notificationRoutes = require("./routes/notificationRoutes");
 const teacherAnalyticsRoutes = require("./routes/teacherAnalyticsRoutes");
 const homeScreenRoutes = require("./routes/homeScreenRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
+
+
+// ---------------------------- v2 ----------------------------
+const v2AuthRoutes = require("./routes/v2/authRoutes");
+const v2OnboardingRoutes = require("./routes/v2/onboardingRoutes");
+
 const { Server } = require("net");
 const app = express();
 
@@ -94,6 +100,12 @@ app.use("/notifications", notificationRoutes);
 app.use("/analytics", teacherAnalyticsRoutes);
 app.use("/home", homeScreenRoutes);
 app.use("/payment", paymentRoutes);
+
+
+// ---------------------------- v2 ----------------------------
+app.use("/api/v2/auth", v2AuthRoutes);
+app.use("/api/v2/onboarding", v2OnboardingRoutes);
+
 app.get("/", (req, res) => {
   res.send("Server running");
 });
