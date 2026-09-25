@@ -32,6 +32,10 @@ const paymentRoutes = require("./routes/paymentRoutes");
 // ---------------------------- v2 ----------------------------
 const v2AuthRoutes = require("./routes/v2/authRoutes");
 const v2OnboardingRoutes = require("./routes/v2/onboardingRoutes");
+const v2QuizRoutes = require("./routes/v2/quizRoutes");
+
+
+
 
 const { Server } = require("net");
 const app = express();
@@ -105,6 +109,11 @@ app.use("/payment", paymentRoutes);
 // ---------------------------- v2 ----------------------------
 app.use("/api/v2/auth", v2AuthRoutes);
 app.use("/api/v2/onboarding", v2OnboardingRoutes);
+app.use("/api/v2/quizzes", v2QuizRoutes);
+
+
+
+
 
 app.get("/", (req, res) => {
   res.send("Server running");
