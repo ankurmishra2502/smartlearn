@@ -260,7 +260,7 @@ def get_previous_stage_performance(
 def save_generated_questions(
     quiz_id: str,
     stage_id: str,
-    stage_attempt_id: str,
+    stage_attempt_id: str | None,
     questions: list[dict],
 ) -> list[dict]:
     """
@@ -272,7 +272,8 @@ def save_generated_questions(
 
     _validate_uuid(quiz_id, "quiz_id")
     _validate_uuid(stage_id, "stage_id")
-    _validate_uuid(stage_attempt_id, "stage_attempt_id")
+    if stage_attempt_id:
+        _validate_uuid(stage_attempt_id, "stage_attempt_id")
 
     if not questions:
         raise ValueError(

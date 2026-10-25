@@ -29,7 +29,7 @@ from app.models.quiz import GeneratedQuizQuestions
 class QuizGenerationState(TypedDict, total=False):
     quiz_id: str
     stage_id: str
-    stage_attempt_id: str
+    stage_attempt_id: str | None
     generation_run_id: str
 
     quiz: dict
