@@ -93,6 +93,12 @@ router.post(
 );
 
 router.post(
+  "/stages/:stageId/retry",
+  authMiddleware,
+  quizController.retryStage
+);
+
+router.post(
   "/:quizId/complete",
   authMiddleware,
   quizController.completeQuiz

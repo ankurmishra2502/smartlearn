@@ -20,6 +20,7 @@ const worker = new Worker(
     const {
       quizId,
       stageId,
+      stageAttemptId,
       generationRunId
     } = job.data;
 
@@ -52,6 +53,7 @@ const worker = new Worker(
           body: JSON.stringify({
             quizId,
             stageId,
+            stageAttemptId,
             generationRunId
           })
         }

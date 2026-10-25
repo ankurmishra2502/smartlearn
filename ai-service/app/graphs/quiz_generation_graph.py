@@ -16,6 +16,7 @@ from app.services.quiz_generation import (
     save_generated_questions,
     update_generation_run,
     update_stage_status,
+    update_stage_attempt_status,
 )
 from app.services.learner_context import load_learner_context
 from app.models.quiz import GeneratedQuizQuestions
@@ -28,6 +29,7 @@ from app.models.quiz import GeneratedQuizQuestions
 class QuizGenerationState(TypedDict, total=False):
     quiz_id: str
     stage_id: str
+    stage_attempt_id: str
     generation_run_id: str
 
     quiz: dict
@@ -266,22 +268,20 @@ def shuffle_question_options(question):
 async def generate_questions(
     state: QuizGenerationState
 ):
-
     context = state["generation_context"]
-
     stage = context["stage"]
 
-    question_count = stage["question_count"]
+    question_count = int(stage["question_count"])
     difficulty = stage["difficulty"]
 
     structured_llm = llm.with_structured_output(
         GeneratedQuizQuestions
     )
 
-    prompt = f"""
+    base_prompt = f"""
 You are the SmartLearn educational quiz generation engine.
 
-Generate EXACTLY {question_count} questions.
+Generate EXACTLY the requested number of NEW questions.
 
 QUIZ TOPIC:
 {context["quiz"]["topic_name"]}
@@ -309,13 +309,12 @@ ATTACHED SOURCES:
 
 QUESTION RULES:
 
-- Generate exactly {question_count} questions.
+- Generate exactly the requested number of questions.
 - Every question must be relevant to the quiz topic.
 - Every question must match the requested difficulty.
 - questionType must be "single_choice".
 - Every question MUST contain exactly 4 options.
-- Option keys MUST be:
-  option1, option2, option3, option4.
+- Option keys MUST be option1, option2, option3, option4.
 - Exactly ONE option must be correct.
 - correctOptionKey MUST identify the correct option.
 - All four options must be plausible and related.
@@ -325,83 +324,122 @@ QUESTION RULES:
 - Return structured data only.
 """
 
-    result = None
+    generated_questions = []
+    seen_questions = set()
 
+    # First attempt generates the complete question set.
+    # Subsequent attempts generate only missing questions.
     for attempt in range(3):
+        missing_count = question_count - len(
+            generated_questions
+        )
+
+        if missing_count <= 0:
+            break
+
+        existing_questions = [
+            question.questionText
+            for question in generated_questions
+        ]
+
+        prompt = f"""
+{base_prompt}
+
+NUMBER OF QUESTIONS REQUIRED IN THIS RESPONSE:
+{missing_count}
+
+QUESTIONS ALREADY GENERATED:
+{existing_questions}
+
+IMPORTANT:
+- Generate exactly {missing_count} questions in this response.
+- Do not repeat or rephrase any existing question.
+- Generate only new questions.
+"""
 
         result = await structured_llm.ainvoke(prompt)
 
-        if len(result.questions) == question_count:
-            break
+        if not result or not result.questions:
+            print(
+                f"⚠️ Generation attempt {attempt + 1}: "
+                "no questions returned."
+            )
+            continue
+
+        added_count = 0
+
+        for question in result.questions:
+            normalized_text = (
+                question.questionText.strip().lower()
+            )
+
+            if not normalized_text:
+                continue
+
+            if normalized_text in seen_questions:
+                continue
+
+            if len(generated_questions) >= question_count:
+                break
+
+            # Keep the existing option and answer validation.
+            if len(question.options) != 4:
+                continue
+
+            option_keys = {
+                option.optionKey
+                for option in question.options
+            }
+
+            expected_keys = {
+                "option1",
+                "option2",
+                "option3",
+                "option4",
+            }
+
+            if option_keys != expected_keys:
+                continue
+
+            if question.correctOptionKey not in option_keys:
+                continue
+
+            seen_questions.add(normalized_text)
+            generated_questions.append(question)
+            added_count += 1
 
         print(
-            f"⚠️ Generation attempt {attempt + 1}: "
-            f"expected {question_count}, "
-            f"received {len(result.questions)}"
+            f"Generation attempt {attempt + 1}: "
+            f"added {added_count}, "
+            f"total {len(generated_questions)}/{question_count}"
         )
 
-        if attempt < 2:
+        if len(generated_questions) < question_count:
             await asyncio.sleep(1)
 
-    if result is None:
+    if len(generated_questions) != question_count:
         raise ValueError(
-            "Quiz generation returned no result."
+            f"Expected {question_count} unique valid questions, "
+            f"but generated {len(generated_questions)} "
+            "after 3 attempts."
         )
 
-    if len(result.questions) != question_count:
-        raise ValueError(
-            f"Expected {question_count} questions, "
-            f"but received {len(result.questions)} "
-            f"after 3 attempts."
-        )
-
-    # Defensive validation before shuffle
-    for question in result.questions:
-
-        if len(question.options) != 4:
-            raise ValueError(
-                "Every generated question must have exactly 4 options."
-            )
-
-        option_keys = {
-            option.optionKey
-            for option in question.options
-        }
-
-        expected_keys = {
-            "option1",
-            "option2",
-            "option3",
-            "option4",
-        }
-
-        if option_keys != expected_keys:
-            raise ValueError(
-                "Each question must contain exactly "
-                "option1, option2, option3, option4."
-            )
-
-        if question.correctOptionKey not in option_keys:
-            raise ValueError(
-                "correctOptionKey does not match any option."
-            )
-
-    # Shuffle options AFTER the LLM has established
-    # which option is actually correct.
-    generated_questions = [
+    # Shuffle options only after validating the correct answer.
+    shuffled_questions = [
         shuffle_question_options(question)
-        for question in result.questions
+        for question in generated_questions
     ]
 
     questions = [
         question.model_dump()
-        for question in generated_questions
+        for question in shuffled_questions
     ]
 
     return {
         "generated_questions": questions
     }
-# ============================================================
+
+#============================================================
 # STEP 9 - VALIDATE QUESTIONS
 # ============================================================
 
@@ -510,20 +548,17 @@ def validate_questions(
 # STEP 10 - PERSIST QUESTIONS
 # ============================================================
 
-def persist_questions(
-    state: QuizGenerationState
-):
-
+def persist_questions(state: QuizGenerationState):
     saved_questions = save_generated_questions(
         quiz_id=state["quiz_id"],
         stage_id=state["stage_id"],
+        stage_attempt_id=state["stage_attempt_id"],
         questions=state["generated_questions"],
     )
 
     return {
         "saved_questions": saved_questions
     }
-
 
 # ============================================================
 # STEP 11 - COMPLETE GENERATION

@@ -7,6 +7,7 @@ class QuizStageGenerationRequest(BaseModel):
     quizId: str
     stageId: str
     generationRunId: str
+    stageAttemptId: str 
 
 
 class QuizStageGenerationResponse(BaseModel):

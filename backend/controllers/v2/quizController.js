@@ -36,30 +36,6 @@ const createQuiz = async (req, res) => {
       });
     }
 
-    if (
-      !stages ||
-      !Number.isInteger(stages.easy) ||
-      !Number.isInteger(stages.medium) ||
-      !Number.isInteger(stages.hard)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "stages.easy, stages.medium and stages.hard are required"
-      });
-    }
-
-    if (
-      stages.easy <= 0 ||
-      stages.medium <= 0 ||
-      stages.hard <= 0
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Stage question counts must be greater than 0"
-      });
-    }
 
     if (
       !Number.isInteger(timePerQuestionSeconds) ||
@@ -625,6 +601,71 @@ const completeStage = async (req, res) => {
   }
 };
 
+const retryStage = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { stageId } = req.params;
+    const { quizAttemptId } = req.body;
+
+    if (!quizAttemptId) {
+      return res.status(400).json({ success: false, message: 'quizAttemptId is required' });
+    }
+
+    // Create the next stage attempt after validating retry eligibility.
+    const result = await quizService.retryStageAttempt({
+      stageId,
+      userId,
+      quizAttemptId
+    });
+
+    // Start a fresh AI generation run for this retry.
+    const generationResult = await quizService.startStageGeneration({
+      quizId: result.quizId,
+      stageId,
+      userId,
+      allowRetry: true
+    });
+
+    const job = await quizGenerationQueue.add(
+  "generate-quiz-stage",
+  {
+    quizId: result.quizId,
+    stageId,
+    stageAttemptId: result.stageAttempt.id,
+    generationRunId: generationResult.generationRun.id
+  },
+  {
+    attempts: 3,
+    backoff: {
+      type: "exponential",
+      delay: 5000
+    },
+    removeOnComplete: true,
+    removeOnFail: false
+  }
+);
+
+    return res.status(202).json({
+      success: true,
+      message: "Stage retry accepted; AI question generation started",
+      data: {
+        stage: generationResult.stage,
+        generationRun: generationResult.generationRun,
+        stageAttempt: result.stageAttempt,
+        attemptNumber: result.attemptNumber,
+        maxAttempts: result.maxAttempts,
+        jobId: job.id
+      }
+    });
+  } catch (error) {
+    console.error('Retry V2 stage error:', error);
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || 'Failed to retry stage'
+    });
+  }
+};
+
 const completeQuiz = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -680,5 +721,6 @@ module.exports = {
     startQuiz,
     answerQuestion,
     completeStage,
+    retryStage,
     completeQuiz
 };

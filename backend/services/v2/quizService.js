@@ -6,34 +6,33 @@ const createQuiz = async ({
   description,
   sourceType,
   timePerQuestionSeconds,
-  stages
 }) => {
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
 
-    const easyCount = stages?.easy;
-    const mediumCount = stages?.medium;
-    const hardCount = stages?.hard;
-
-    // Validate stage configuration
-    for (const [difficulty, count] of Object.entries({
-      easy: easyCount,
-      medium: mediumCount,
-      hard: hardCount
-    })) {
-      if (
-        !Number.isInteger(count) ||
-        count <= 0
-      ) {
-        const error = new Error(
-          `${difficulty} question count must be a positive integer`
-        );
-        error.statusCode = 400;
-        throw error;
-      }
-    }
+    // Fixed stage configuration
+    const stageDefinitions = [
+      {
+        difficulty: "easy",
+        displayOrder: 1,
+        questionCount: 10,
+        pointsPerQuestion: 2,
+      },
+      {
+        difficulty: "medium",
+        displayOrder: 2,
+        questionCount: 20,
+        pointsPerQuestion: 3,
+      },
+      {
+        difficulty: "hard",
+        displayOrder: 3,
+        questionCount: 40,
+        pointsPerQuestion: 4,
+      },
+    ];
 
     // Create quiz
     const quizResult = await client.query(
@@ -46,14 +45,7 @@ const createQuiz = async ({
         status,
         time_per_question_seconds
       )
-      VALUES (
-        $1,
-        $2,
-        $3,
-        $4,
-        'draft',
-        $5
-      )
+      VALUES ($1, $2, $3, $4, 'draft', $5)
       RETURNING *
       `,
       [
@@ -61,33 +53,14 @@ const createQuiz = async ({
         topicName,
         description || null,
         sourceType,
-        timePerQuestionSeconds
+        timePerQuestionSeconds,
       ]
     );
 
     const quiz = quizResult.rows[0];
-
-    // Create stages
-    const stageDefinitions = [
-      {
-        difficulty: "easy",
-        displayOrder: 1,
-        questionCount: easyCount
-      },
-      {
-        difficulty: "medium",
-        displayOrder: 2,
-        questionCount: mediumCount
-      },
-      {
-        difficulty: "hard",
-        displayOrder: 3,
-        questionCount: hardCount
-      }
-    ];
-
     const stagesResult = [];
 
+    // Create stages using fixed configuration
     for (const stage of stageDefinitions) {
       const result = await client.query(
         `
@@ -96,22 +69,18 @@ const createQuiz = async ({
           difficulty,
           display_order,
           question_count,
+          points_per_question,
           status
         )
-        VALUES (
-          $1,
-          $2,
-          $3,
-          $4,
-          'pending'
-        )
+        VALUES ($1, $2, $3, $4, $5, 'pending')
         RETURNING *
         `,
         [
           quiz.id,
           stage.difficulty,
           stage.displayOrder,
-          stage.questionCount
+          stage.questionCount,
+          stage.pointsPerQuestion,
         ]
       );
 
@@ -122,9 +91,9 @@ const createQuiz = async ({
 
     return {
       ...quiz,
-      stages: stagesResult
+      passingPercentage: 70,
+      stages: stagesResult,
     };
-
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -364,7 +333,8 @@ const getQuizStages = async ({
 const startStageGeneration = async ({
   quizId,
   stageId,
-  userId
+  userId,
+  allowRetry = false
 }) => {
   const client = await pool.connect();
 
@@ -428,7 +398,7 @@ const startStageGeneration = async ({
       throw error;
     }
 
-    if (stage.status === "ready") {
+    if (stage.status === "ready" && !allowRetry) {
       const error = new Error(
         "Stage has already been generated"
       );
@@ -436,9 +406,12 @@ const startStageGeneration = async ({
       throw error;
     }
 
+    // A retry may regenerate a ready stage after its previous attempt failed.
+    // Normal generation still cannot run for in-progress or completed stages.
     if (
       stage.status === "in_progress" ||
-      stage.status === "completed"
+      stage.status === "completed" ||
+      (allowRetry && stage.status !== "ready")
     ) {
       const error = new Error(
         "Stage cannot be generated in its current state"
@@ -1192,6 +1165,12 @@ const answerQuestion = async ({
   }
 };
 
+const STAGE_SCORING = {
+  easy: { pointsPerQuestion: 2, passingPercentage: 70, xp: 50 },
+  medium: { pointsPerQuestion: 3, passingPercentage: 70, xp: 100 },
+  hard: { pointsPerQuestion: 4, passingPercentage: 70, xp: 150 }
+};
+
 const completeStage = async ({
   stageId,
   userId,
@@ -1201,204 +1180,344 @@ const completeStage = async ({
   const client = await pool.connect();
 
   try {
-    await client.query("BEGIN");
+    await client.query('BEGIN');
 
-    // 1. Validate active stage attempt
-    const stageAttemptResult = await client.query(
-      `
-      SELECT
-        sa.id,
-        sa.quiz_attempt_id,
-        sa.stage_id,
-        sa.user_id,
-        sa.status AS stage_attempt_status,
-        s.quiz_id,
-        s.display_order,
-        s.question_count,
-        s.status AS stage_status,
-        qa.status AS quiz_attempt_status
-      FROM v2_stage_attempts sa
-      INNER JOIN v2_quiz_stages s
-        ON s.id = sa.stage_id
-      INNER JOIN v2_quiz_attempts qa
-        ON qa.id = sa.quiz_attempt_id
-      WHERE sa.id = $1
-        AND sa.stage_id = $2
-        AND sa.quiz_attempt_id = $3
-        AND sa.user_id = $4
-      FOR UPDATE
-      `,
-      [
-        stageAttemptId,
-        stageId,
-        quizAttemptId,
-        userId
-      ]
+    const attemptResult = await client.query(
+      `SELECT sa.id, sa.quiz_attempt_id, sa.stage_id, sa.user_id,
+              sa.attempt_number, sa.status AS stage_attempt_status,
+              s.quiz_id, s.display_order, s.question_count, s.difficulty,
+              s.status AS stage_status, qa.status AS quiz_attempt_status
+       FROM v2_stage_attempts sa
+       JOIN v2_quiz_stages s ON s.id = sa.stage_id
+       JOIN v2_quiz_attempts qa ON qa.id = sa.quiz_attempt_id
+       WHERE sa.id = $1 AND sa.stage_id = $2
+         AND sa.quiz_attempt_id = $3 AND sa.user_id = $4
+       FOR UPDATE OF sa, s, qa`,
+      [stageAttemptId, stageId, quizAttemptId, userId]
     );
 
-    if (!stageAttemptResult.rows.length) {
-      const error = new Error("Stage attempt not found");
-      error.statusCode = 404;
-      throw error;
+    if (!attemptResult.rows.length) {
+      const error = new Error('Stage attempt not found'); error.statusCode = 404; throw error;
+    }
+    const stageAttempt = attemptResult.rows[0];
+    if (stageAttempt.stage_attempt_status !== 'in_progress') {
+      const error = new Error('Stage attempt is not active'); error.statusCode = 409; throw error;
+    }
+    if (!['started', 'in_progress'].includes(stageAttempt.quiz_attempt_status)) {
+      const error = new Error('Quiz attempt is not active'); error.statusCode = 409; throw error;
     }
 
-    const stageAttempt = stageAttemptResult.rows[0];
+    const scoring = STAGE_SCORING[String(stageAttempt.difficulty).toLowerCase()];
+    if (!scoring) {
+      const error = new Error(`Unsupported stage difficulty: ${stageAttempt.difficulty}`); error.statusCode = 500; throw error;
+    }
+   
+    console.log("DEBUG: Running statsResult query", {
+  stageAttemptId,
+  userId,
+});
 
-    if (stageAttempt.stage_attempt_status !== "in_progress") {
-      const error = new Error("Stage attempt is not active");
-      error.statusCode = 409;
-      throw error;
+console.log("DEBUG: Testing statsResult minimal query");
+
+const statsResult = await client.query( `SELECT COUNT(*)::INTEGER AS total_recorded, COUNT(*) FILTER ( WHERE status = 'answered' )::INTEGER AS answered_count, COUNT(*) FILTER ( WHERE status = 'answered' AND is_correct IS TRUE )::INTEGER AS correct_count, COUNT(*) FILTER ( WHERE status = 'answered' AND is_correct IS FALSE )::INTEGER AS incorrect_count, COUNT(*) FILTER ( WHERE status = 'skipped' )::INTEGER AS skipped_count, COUNT(*) FILTER ( WHERE status = 'timeout' )::INTEGER AS timeout_count, COALESCE(SUM(time_taken_ms), 0)::BIGINT AS total_time_taken_ms, COALESCE( AVG(time_taken_ms) FILTER ( WHERE time_taken_ms IS NOT NULL ), 0 )::NUMERIC(12, 2) AS average_time_taken_ms FROM v2_question_attempts WHERE stage_attempt_id = $1::UUID AND user_id = $2::UUID`, [stageAttemptId, userId] );
+
+console.log("DEBUG: Minimal query succeeded", statsResult.rows[0]);
+    const stats = statsResult.rows[0];
+    const attemptedCount = Number(stats.total_recorded);
+    if (attemptedCount !== Number(stageAttempt.question_count)) {
+      const error = new Error(`Stage is not complete. ${attemptedCount} of ${stageAttempt.question_count} questions have recorded outcomes`);
+      error.statusCode = 409; throw error;
     }
 
-    if (
-      !["started", "in_progress"].includes(
-        stageAttempt.quiz_attempt_status
-      )
-    ) {
-      const error = new Error("Quiz attempt is not active");
-      error.statusCode = 409;
-      throw error;
-    }
+    const correctCount = Number(stats.correct_count);
+    const totalMarks = Number(stageAttempt.question_count) * scoring.pointsPerQuestion;
+    const score = correctCount * scoring.pointsPerQuestion;
+    const passingMarks = Math.ceil(totalMarks * scoring.passingPercentage / 100);
+    const passed = score >= passingMarks;
+    const stageStatus = passed ? 'passed' : 'failed';
+    const marksLost = totalMarks - score;
+    const percentage = totalMarks > 0 ? Number((score / totalMarks * 100).toFixed(2)) : 0;
 
-    // 2. Count attempted questions
-    const attemptedResult = await client.query(
-      `
-      SELECT COUNT(*)::INTEGER AS attempted_count
-      FROM v2_question_attempts
-      WHERE stage_attempt_id = $1
-      `,
-      [stageAttemptId]
+    const completedAttemptResult = await client.query(
+      `UPDATE v2_stage_attempts SET status = $2, completed_at = CURRENT_TIMESTAMP,
+              updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *`,
+      [stageAttemptId, stageStatus]
     );
+    const completedStageAttempt = completedAttemptResult.rows[0];
 
-    const attemptedCount =
-      attemptedResult.rows[0].attempted_count;
-
-    if (attemptedCount < stageAttempt.question_count) {
-      const error = new Error(
-        `Stage is not complete. ${attemptedCount} of ${stageAttempt.question_count} questions attempted`
+    // A failed attempt does not complete the stage; the stage remains ready for a retry.
+    let completedStage = stageAttempt.stage_status;
+    if (passed) {
+      const stageResult = await client.query(
+        `UPDATE v2_quiz_stages SET status = 'completed', updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1 RETURNING *`, [stageId]
       );
-      error.statusCode = 409;
-      throw error;
+      completedStage = stageResult.rows[0];
+    } else {
+      const stageResult = await client.query(`SELECT * FROM v2_quiz_stages WHERE id = $1`, [stageId]);
+      completedStage = stageResult.rows[0];
     }
 
-    // 3. Complete stage attempt
-    const completedStageAttemptResult = await client.query(
-      `
-      UPDATE v2_stage_attempts
-      SET
-        status = 'passed',
-        completed_at = CURRENT_TIMESTAMP,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = $1
-      RETURNING *
-      `,
-      [stageAttemptId]
+    // Topic-wise marks lost, including skipped and timed-out questions.
+    const topicResult = await client.query(
+      `SELECT COALESCE(NULLIF(BTRIM(q.topic_name), ''), 'Uncategorized') AS topic_name,
+              COUNT(*)::INTEGER AS question_count,
+              COUNT(*) FILTER (WHERE qa.status = 'answered' AND qa.is_correct IS TRUE)::INTEGER AS correct_count,
+              COUNT(*) FILTER (WHERE qa.status = 'answered' AND qa.is_correct IS FALSE)::INTEGER AS incorrect_count,
+              COUNT(*) FILTER (WHERE qa.status = 'skipped')::INTEGER AS skipped_count,
+              COUNT(*) FILTER (WHERE qa.status = 'timeout')::INTEGER AS timeout_count
+       FROM v2_question_attempts qa
+       JOIN v2_quiz_questions q ON q.id = qa.question_id
+       WHERE qa.stage_attempt_id = $1 AND qa.user_id = $2
+       GROUP BY COALESCE(NULLIF(BTRIM(q.topic_name), ''), 'Uncategorized')
+       ORDER BY question_count DESC, topic_name ASC`,
+      [stageAttemptId, userId]
     );
+    const topicBreakdown = topicResult.rows.map(row => {
+      const topicQuestions = Number(row.question_count);
+      const topicCorrect = Number(row.correct_count);
+      return {
+        topicName: row.topic_name,
+        questionCount: topicQuestions,
+        correct: topicCorrect,
+        incorrect: Number(row.incorrect_count),
+        skipped: Number(row.skipped_count),
+        timeout: Number(row.timeout_count),
+        marksLost: (topicQuestions - topicCorrect) * scoring.pointsPerQuestion
+      };
+    });
 
-    const completedStageAttempt =
-      completedStageAttemptResult.rows[0];
+    // Compare against the immediately previous attempt of this same stage in this quiz attempt.
+    const previousResult = await client.query(
+  `SELECT sa.id, sa.attempt_number, sa.status,
+          COUNT(qa.id)::INTEGER AS question_count,
+          COUNT(qa.id) FILTER (
+            WHERE qa.status = 'answered'
+              AND qa.is_correct IS TRUE
+          )::INTEGER AS correct_count
+   FROM v2_stage_attempts sa
+   LEFT JOIN v2_question_attempts qa
+     ON qa.stage_attempt_id = sa.id
+   WHERE sa.quiz_attempt_id = $1
+     AND sa.stage_id = $2
+     AND sa.user_id = $3
+     AND sa.attempt_number < $4::INTEGER
+   GROUP BY sa.id
+   ORDER BY sa.attempt_number DESC
+   LIMIT 1`,
+  [
+    quizAttemptId,
+    stageId,
+    userId,
+    Number(stageAttempt.attempt_number)
+  ]
+);
+    let previousAttempt = null;
+    if (previousResult.rows.length) {
+      const prev = previousResult.rows[0];
+      const prevCorrect = Number(prev.correct_count);
+      previousAttempt = {
+        stageAttemptId: prev.id,
+        attemptNumber: Number(prev.attempt_number),
+        status: prev.status,
+        score: prevCorrect * scoring.pointsPerQuestion,
+        totalMarks,
+        percentage: totalMarks > 0 ? Number((prevCorrect * scoring.pointsPerQuestion / totalMarks * 100).toFixed(2)) : 0
+      };
+    }
 
-    // 4. Mark stage completed
-    const completedStageResult = await client.query(
-      `
-      UPDATE v2_quiz_stages
-      SET
-        status = 'completed',
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = $1
-      RETURNING *
-      `,
-      [stageId]
-    );
+    let xpTransaction = null;
+    let xpAwarded = 0;
+    let updatedUserStats = null;
+    if (passed) {
+      const xpResult = await client.query(
+        `INSERT INTO v2_xp_transactions
+           (user_id, xp, source_type, source_id, quiz_id, quiz_attempt_id, stage_id, difficulty, metadata)
+         VALUES ($1, $2, 'stage_pass', $3, $4, $5, $6, $7, $8::jsonb)
+         ON CONFLICT (source_id) WHERE source_type = 'stage_pass' AND source_id IS NOT NULL
+         DO NOTHING RETURNING *`,
+        [userId, scoring.xp, stageAttemptId, stageAttempt.quiz_id, quizAttemptId,
+          stageId, stageAttempt.difficulty, JSON.stringify({ difficulty: stageAttempt.difficulty, score, totalMarks, passingMarks, questionCount: Number(stageAttempt.question_count) })]
+      );
+      if (xpResult.rows.length) {
+        xpTransaction = xpResult.rows[0];
+        xpAwarded = Number(xpTransaction.xp);
+        const userStatsResult = await client.query(
+  `INSERT INTO v2_user_stats (user_id, total_xp, level)
+   VALUES (
+     $1::UUID,
+     $2::INTEGER,
+     FLOOR($2::NUMERIC / 500)::INTEGER + 1
+   )
+   ON CONFLICT (user_id)
+   DO UPDATE SET
+     total_xp = v2_user_stats.total_xp + EXCLUDED.total_xp,
+     level = FLOOR(
+       (v2_user_stats.total_xp::NUMERIC + EXCLUDED.total_xp::NUMERIC) / 500
+     )::INTEGER + 1,
+     updated_at = CURRENT_TIMESTAMP
+   RETURNING *`,
+  [userId, xpAwarded]
+);
+        updatedUserStats = userStatsResult.rows[0];
+      }
+    }
 
-    const completedStage =
-      completedStageResult.rows[0];
-
-    // 5. Find next stage
-    const nextStageResult = await client.query(
-      `
-      SELECT *
-      FROM v2_quiz_stages
-      WHERE quiz_id = $1
-        AND display_order > $2
-      ORDER BY display_order ASC
-      LIMIT 1
-      FOR UPDATE
-      `,
-      [
-        stageAttempt.quiz_id,
-        stageAttempt.display_order
-      ]
-    );
-
-    const nextStage = nextStageResult.rows[0] || null;
-
-    // 6. If another stage exists, create its stage attempt
+    let nextStage = null;
     let nextStageAttempt = null;
-
-    if (nextStage) {
-      const attemptNumberResult = await client.query(
-        `
-        SELECT
-          COALESCE(MAX(attempt_number), 0) + 1 AS attempt_number
-        FROM v2_stage_attempts
-        WHERE quiz_attempt_id = $1
-          AND stage_id = $2
-          AND user_id = $3
-        `,
-        [
-          quizAttemptId,
-          nextStage.id,
-          userId
-        ]
+    if (passed) {
+      const nextResult = await client.query(
+        `SELECT * FROM v2_quiz_stages WHERE quiz_id = $1 AND display_order > $2
+         ORDER BY display_order ASC LIMIT 1 FOR UPDATE`,
+        [stageAttempt.quiz_id, stageAttempt.display_order]
       );
-
-      const attemptNumber =
-        attemptNumberResult.rows[0].attempt_number;
-
-      const nextStageAttemptResult = await client.query(
-        `
-        INSERT INTO v2_stage_attempts (
-          quiz_attempt_id,
-          stage_id,
-          user_id,
-          attempt_number,
-          status,
-          started_at
-        )
-        VALUES (
-          $1,
-          $2,
-          $3,
-          $4,
-          'in_progress',
-          CURRENT_TIMESTAMP
-        )
-        RETURNING *
-        `,
-        [
-          quizAttemptId,
-          nextStage.id,
-          userId,
-          attemptNumber
-        ]
-      );
-
-      nextStageAttempt =
-        nextStageAttemptResult.rows[0];
+      nextStage = nextResult.rows[0] || null;
+      if (nextStage) {
+        // Do not duplicate an already-created next-stage attempt.
+        const existingNext = await client.query(
+          `SELECT * FROM v2_stage_attempts WHERE quiz_attempt_id = $1 AND stage_id = $2 AND user_id = $3
+           ORDER BY attempt_number DESC LIMIT 1 FOR UPDATE`,
+          [quizAttemptId, nextStage.id, userId]
+        );
+        if (existingNext.rows.length) {
+          nextStageAttempt = existingNext.rows[0];
+        } else {
+          const numberResult = await client.query(
+            `SELECT COALESCE(MAX(attempt_number), 0) + 1 AS attempt_number
+             FROM v2_stage_attempts WHERE quiz_attempt_id = $1 AND stage_id = $2 AND user_id = $3`,
+            [quizAttemptId, nextStage.id, userId]
+          );
+          const insertResult = await client.query(
+            `INSERT INTO v2_stage_attempts (quiz_attempt_id, stage_id, user_id, attempt_number, status, started_at)
+             VALUES ($1, $2, $3, $4, 'in_progress', CURRENT_TIMESTAMP) RETURNING *`,
+            [quizAttemptId, nextStage.id, userId, Number(numberResult.rows[0].attempt_number)]
+          );
+          nextStageAttempt = insertResult.rows[0];
+        }
+      }
     }
 
-    await client.query("COMMIT");
+    const attemptsUsed = Number(stageAttempt.attempt_number);
+    const maxAttempts = 3;
+    const canRetry = !passed && attemptsUsed < maxAttempts;
+    const answeredCount = Number(stats.answered_count);
+    const accuracy = answeredCount > 0 ? Number((correctCount / answeredCount * 100).toFixed(2)) : 0;
 
+    await client.query('COMMIT');
     return {
       stage: completedStage,
       stageAttempt: completedStageAttempt,
-      attemptedCount,
+      summary: {
+        difficulty: stageAttempt.difficulty,
+        status: stageStatus,
+        passed,
+        attemptNumber: attemptsUsed,
+        maxAttempts,
+        attemptsRemaining: Math.max(0, maxAttempts - attemptsUsed),
+        questionCount: Number(stageAttempt.question_count),
+        attempted: attemptedCount,
+        answered: answeredCount,
+        correct: correctCount,
+        incorrect: Number(stats.incorrect_count),
+        skipped: Number(stats.skipped_count),
+        timeout: Number(stats.timeout_count),
+        pointsPerQuestion: scoring.pointsPerQuestion,
+        score,
+        totalMarks,
+        percentage,
+        passingPercentage: scoring.passingPercentage,
+        passingMarks,
+        marksLost,
+        marksRemaining: Math.max(0, totalMarks - score),
+        accuracy,
+        totalTimeTakenMs: Number(stats.total_time_taken_ms),
+        averageTimeTakenMs: Number(stats.average_time_taken_ms),
+        topicBreakdown,
+        previousAttempt
+      },
+      xp: {
+        awarded: xpAwarded,
+        transaction: xpTransaction,
+        totalXP: updatedUserStats ? Number(updatedUserStats.total_xp) : null,
+        level: updatedUserStats ? Number(updatedUserStats.level) : null
+      },
       nextStage,
-      nextStageAttempt
+      nextStageAttempt,
+      canRetry,
+      canContinue: passed && Boolean(nextStage),
+      quizCompleted: passed && !nextStage
     };
+    } catch (error) {
+  console.error("completeStage failed:", {
+    message: error.message,
+    code: error.code,
+    position: error.position,
+    detail: error.detail,
+    stack: error.stack,
+  });
+
+  await client.query("ROLLBACK");
+  throw error;
+} finally {
+  client.release();
+}
+};
+//   } catch (error) {
+//     await client.query('ROLLBACK');
+//     throw error;
+//   } finally {
+//     client.release();
+//   }
+// };
+
+const retryStageAttempt = async ({ stageId, userId, quizAttemptId }) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const currentResult = await client.query(
+      `SELECT qa.id AS quiz_attempt_id, qa.status AS quiz_status, qa.quiz_id,
+              s.id AS stage_id, s.difficulty, s.display_order, s.status AS stage_status,
+              sa.id AS latest_stage_attempt_id, sa.attempt_number, sa.status AS latest_status
+       FROM v2_quiz_attempts qa
+       JOIN v2_quiz_stages s ON s.quiz_id = qa.quiz_id AND s.id = $1
+       LEFT JOIN LATERAL (
+         SELECT id, attempt_number, status FROM v2_stage_attempts
+         WHERE quiz_attempt_id = qa.id AND stage_id = s.id AND user_id = qa.user_id
+         ORDER BY attempt_number DESC LIMIT 1
+       ) sa ON TRUE
+       WHERE qa.id = $2 AND qa.user_id = $3
+       FOR UPDATE OF qa, s`,
+      [stageId, quizAttemptId, userId]
+    );
+    if (!currentResult.rows.length) {
+      const error = new Error('Stage or quiz attempt not found'); error.statusCode = 404; throw error;
+    }
+    const current = currentResult.rows[0];
+    if (!['started', 'in_progress'].includes(current.quiz_status)) {
+      const error = new Error('Quiz attempt is not active'); error.statusCode = 409; throw error;
+    }
+    if (current.latest_status !== 'failed') {
+      const error = new Error('Only a failed stage attempt can be retried'); error.statusCode = 409; throw error;
+    }
+    if (Number(current.attempt_number) >= 3) {
+      const error = new Error('Maximum of 3 attempts reached for this stage'); error.statusCode = 409; throw error;
+    }
+    const activeResult = await client.query(
+      `SELECT id FROM v2_stage_attempts WHERE quiz_attempt_id = $1 AND user_id = $2 AND status = 'in_progress' FOR UPDATE`,
+      [quizAttemptId, userId]
+    );
+    if (activeResult.rows.length) {
+      const error = new Error('Another stage attempt is already active'); error.statusCode = 409; throw error;
+    }
+    const retryResult = await client.query(
+      `INSERT INTO v2_stage_attempts (quiz_attempt_id, stage_id, user_id, attempt_number, status, started_at)
+       VALUES ($1, $2, $3, $4, 'in_progress', CURRENT_TIMESTAMP) RETURNING *`,
+      [quizAttemptId, stageId, userId, Number(current.attempt_number) + 1]
+    );
+    await client.query('COMMIT');
+    return { quizId: current.quiz_id, stageId, quizAttemptId, stageAttempt: retryResult.rows[0], attemptNumber: Number(current.attempt_number) + 1, maxAttempts: 3 };
   } catch (error) {
-    await client.query("ROLLBACK");
+    await client.query('ROLLBACK');
     throw error;
   } finally {
     client.release();
@@ -1705,6 +1824,7 @@ module.exports = {
     startQuizAttempt,
     answerQuestion,
     completeStage,
+    retryStageAttempt,
     completeQuiz
 
 };

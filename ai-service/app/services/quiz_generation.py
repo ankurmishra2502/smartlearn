@@ -260,6 +260,7 @@ def get_previous_stage_performance(
 def save_generated_questions(
     quiz_id: str,
     stage_id: str,
+    stage_attempt_id: str,
     questions: list[dict],
 ) -> list[dict]:
     """
@@ -271,6 +272,7 @@ def save_generated_questions(
 
     _validate_uuid(quiz_id, "quiz_id")
     _validate_uuid(stage_id, "stage_id")
+    _validate_uuid(stage_attempt_id, "stage_attempt_id")
 
     if not questions:
         raise ValueError(
@@ -291,6 +293,7 @@ def save_generated_questions(
                         """
                         INSERT INTO v2_quiz_questions (
                             stage_id,
+                            stage_attempt_id,
                             question_text,
                             question_type,
                             topic_name,
@@ -315,12 +318,14 @@ def save_generated_questions(
                             %s,
                             %s,
                             %s,
+                            %s,
                             %s
                         )
                         RETURNING *
                         """,
                         (
                             stage_id,
+                            stage_attempt_id,
                             question["questionText"],
                             question.get(
                                 "questionType",
@@ -531,3 +536,34 @@ def update_stage_status(
         conn.commit()
 
     return result
+
+def update_stage_attempt_status(
+    stage_attempt_id: str,
+    status: str,
+) -> None:
+    _validate_uuid(stage_attempt_id, "stage_attempt_id")
+
+    with db_pool.connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE v2_stage_attempts
+                SET
+                    status = %s,
+                    completed_at = CASE
+                        WHEN %s IN ('completed', 'failed')
+                        THEN CURRENT_TIMESTAMP
+                        ELSE completed_at
+                    END,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                """,
+                (status, status, stage_attempt_id),
+            )
+
+            if cursor.rowcount == 0:
+                raise ValueError(
+                    f"Stage attempt not found: {stage_attempt_id}"
+                )
+
+        conn.commit()

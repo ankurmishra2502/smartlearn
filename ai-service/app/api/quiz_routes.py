@@ -9,6 +9,7 @@ from app.graphs.quiz_generation_graph import (
 )
 from app.services.quiz_generation import (
     update_generation_run,
+    update_stage_attempt_status,
     update_stage_status,
 )
 
@@ -32,6 +33,7 @@ async def generate_quiz_stage(
                 "quiz_id": payload.quizId,
                 "stage_id": payload.stageId,
                 "generation_run_id": payload.generationRunId,
+                "stage_attempt_id": payload.stageAttemptId,
             }
         )
 
@@ -76,7 +78,10 @@ async def generate_quiz_stage(
                     "stage_id": payload.stageId,
                 },
             )
-
+            update_stage_attempt_status(
+            stage_attempt_id=payload.stageAttemptId,
+            status="failed",
+        )
             update_stage_status(
                 stage_id=payload.stageId,
                 status="failed",
