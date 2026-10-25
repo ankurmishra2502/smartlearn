@@ -42,6 +42,12 @@ const worker = new Worker(
       console.log(
         "\n🧠 Calling Python AI service..."
       );
+      console.log("📤 Quiz generation request payload:", {
+  quizId,
+  stageId,
+  stageAttemptId,
+  generationRunId,
+});
 
       const response = await fetch(
         `${AI_SERVICE_URL}/internal/v1/quiz/stages/generate`,
@@ -71,12 +77,7 @@ const worker = new Worker(
         );
       }
 
-      if (!response.ok) {
-        throw new Error(
-          data.message ||
-          `AI service failed with status ${response.status}`
-        );
-      }
+      if (!response.ok) { const errorDetails = data.detail || data.message || data.error || data; console.error("❌ AI service request failed:", { status: response.status, statusText: response.statusText, details: errorDetails, quizId, stageId, stageAttemptId, generationRunId, }); throw new Error( `AI service failed with status ${response.status}: ${ typeof errorDetails === "string" ? errorDetails : JSON.stringify(errorDetails) }` ); }
 
       console.log(
         "✅ Python AI service completed successfully"
