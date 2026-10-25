@@ -280,64 +280,52 @@ const getQuizStages = async (req, res) => {
 };
 
 const generateStage = async (req, res) => {
-  try {
-    const userId = req.user.id;
+try {
+const userId = req.user.id;
+const { quizId, stageId } = req.params;
 
-    const {
-      quizId,
-      stageId
-    } = req.params;
+const result = await quizService.startStageGeneration({
+  quizId,
+  stageId,
+  userId
+});
 
-    // Start the generation lifecycle in PostgreSQL
-    const result =
-      await quizService.startStageGeneration({
-        quizId,
-        stageId,
-        userId
-      });
-
-    // Add AI generation job to BullMQ
-    await quizGenerationQueue.add(
-      "generate-quiz-stage",
-      {
-        quizId,
-        stageId,
-        generationRunId:
-          result.generationRun.id
-      },
-      {
-        attempts: 3,
-        backoff: {
-          type: "exponential",
-          delay: 5000
-        },
-        removeOnComplete: true,
-        removeOnFail: false
-      }
-    );
-
-    return res.status(202).json({
-      success: true,
-      message: "Stage generation started",
-      data: {
-        stage: result.stage,
-        generationRun: result.generationRun
-      }
-    });
-
-  } catch (error) {
-    console.error(
-      "Start V2 stage generation error:",
-      error
-    );
-
-    return res.status(error.statusCode || 500).json({
-      success: false,
-      message:
-        error.message ||
-        "Failed to start stage generation"
-    });
+await quizGenerationQueue.add(
+  "generate-quiz-stage",
+  {
+    quizId,
+    stageId,
+    generationRunId: result.generationRun.id
+  },
+  {
+    attempts: 3,
+    backoff: {
+      type: "exponential",
+      delay: 5000
+    },
+    removeOnComplete: true,
+    removeOnFail: false
   }
+);
+
+return res.status(202).json({
+  success: true,
+  message: "Stage generation started",
+  data: {
+    stage: result.stage,
+    generationRun: result.generationRun
+  }
+});
+
+} catch (error) {
+console.error("Start V2 stage generation error:", error);
+
+return res.status(error.statusCode || 500).json({
+  success: false,
+  message: error.message || "Failed to start stage generation"
+});
+
+}
 };
 
 const getStage = async (req, res) => {
