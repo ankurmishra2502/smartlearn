@@ -78,14 +78,15 @@ async def generate_quiz_stage(
                     "stage_id": payload.stageId,
                 },
             )
-            update_stage_attempt_status(
-            stage_attempt_id=payload.stageAttemptId,
-            status="failed",
-        )
             update_stage_status(
                 stage_id=payload.stageId,
                 status="failed",
             )
+            if payload.stageAttemptId:
+                update_stage_attempt_status(
+                    stage_attempt_id=payload.stageAttemptId,
+                    status="failed",
+                )
 
         except Exception as state_error:
 
