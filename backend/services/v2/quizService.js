@@ -1,4 +1,5 @@
 const pool = require("../../config/db");
+const aiTutorQueue = require("../../queues/aiTutorQueue");
 
 const createQuiz = async ({
   userId,
@@ -1808,6 +1809,807 @@ const completeQuiz = async ({
   }
 };
 
+const getReviewSession = async ({ quizAttemptId, userId }) => {
+  const result = await pool.query(
+    `
+    SELECT
+      qa.id AS question_attempt_id,
+      qa.quiz_attempt_id,
+      qa.stage_attempt_id,
+      qa.question_id,
+      qa.status AS answer_status,
+      qa.selected_option_id,
+      qa.is_correct,
+      qa.time_taken_ms,
+      qa.answered_at,
+
+      q.display_order,
+      q.question_text,
+      q.question_type,
+      q.topic_name,
+      q.explanation,
+      q.correct_option_key,
+
+      selected.option_key AS selected_option_key,
+      selected.option_text AS selected_option_text,
+
+      correct.option_text AS correct_option_text,
+
+      COALESCE(
+        options.all_options,
+        '[]'::jsonb
+      ) AS options,
+
+      qr.mistake_category,
+      COALESCE(
+        qr.review_status,
+        'needs_review'
+      ) AS review_status
+
+    FROM v2_question_attempts qa
+
+    INNER JOIN v2_quiz_attempts quiz_attempt
+      ON quiz_attempt.id = qa.quiz_attempt_id
+
+    INNER JOIN v2_quiz_questions q
+      ON q.id = qa.question_id
+
+    LEFT JOIN v2_quiz_options selected
+      ON selected.id = qa.selected_option_id
+
+    LEFT JOIN v2_quiz_options correct
+      ON correct.question_id = q.id
+     AND correct.option_key = q.correct_option_key
+
+    LEFT JOIN v2_question_reviews qr
+      ON qr.question_id = qa.question_id
+     AND qr.user_id = qa.user_id
+
+    LEFT JOIN LATERAL (
+      SELECT jsonb_agg(
+        jsonb_build_object(
+          'id', o.id,
+          'key', o.option_key,
+          'text', o.option_text,
+          'displayOrder', o.display_order
+        )
+        ORDER BY o.display_order
+      ) AS all_options
+      FROM v2_quiz_options o
+      WHERE o.question_id = q.id
+    ) options ON TRUE
+
+    WHERE qa.quiz_attempt_id = $1
+      AND qa.user_id = $2
+      AND quiz_attempt.user_id = $2
+
+    ORDER BY
+      qa.created_at ASC,
+      q.display_order ASC
+    `,
+    [quizAttemptId, userId]
+  );
+
+  return {
+    questions: result.rows.map((row) => ({
+      questionAttemptId: row.question_attempt_id,
+      quizAttemptId: row.quiz_attempt_id,
+      stageAttemptId: row.stage_attempt_id,
+      questionId: row.question_id,
+
+      displayOrder: row.display_order,
+      questionText: row.question_text,
+      questionType: row.question_type,
+      topicName: row.topic_name,
+      explanation: row.explanation,
+
+      answerStatus: row.answer_status,
+      isCorrect: row.is_correct,
+
+      selectedOptionId: row.selected_option_id,
+      selectedOptionKey: row.selected_option_key,
+      selectedOptionText: row.selected_option_text,
+
+      correctOptionKey: row.correct_option_key,
+      correctOptionText: row.correct_option_text,
+
+      options: row.options,
+
+      timeTakenMs:
+        row.time_taken_ms === null
+          ? null
+          : Number(row.time_taken_ms),
+
+      answeredAt: row.answered_at,
+
+      mistakeCategory: row.mistake_category,
+      reviewStatus: row.review_status
+    }))
+  };
+};
+
+
+const updateQuestionReview = async ({
+  questionId,
+  userId,
+  mistakeCategory,
+  reviewStatus
+}) => {
+  const allowedCategories = [
+    "concept",
+    "calculation",
+    "misread",
+    "guess",
+    "time"
+  ];
+
+  const allowedStatuses = [
+    "needs_review",
+    "understood",
+    "practice_again"
+  ];
+
+  if (
+    mistakeCategory !== undefined &&
+    mistakeCategory !== null &&
+    !allowedCategories.includes(mistakeCategory)
+  ) {
+    const error = new Error("Invalid mistake category");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (
+    reviewStatus !== undefined &&
+    !allowedStatuses.includes(reviewStatus)
+  ) {
+    const error = new Error("Invalid review status");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (
+    mistakeCategory === undefined &&
+    reviewStatus === undefined
+  ) {
+    const error = new Error(
+      "Provide mistakeCategory or reviewStatus"
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // A review tag is permitted only for a question
+  // the authenticated user has answered incorrectly.
+  const attemptResult = await pool.query(
+    `
+    SELECT 1
+    FROM v2_question_attempts
+    WHERE question_id = $1
+      AND user_id = $2
+      AND status = 'answered'
+      AND is_correct = FALSE
+    LIMIT 1
+    `,
+    [questionId, userId]
+  );
+
+  if (!attemptResult.rows.length) {
+    const error = new Error(
+      "No incorrect answer found for this question"
+    );
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const result = await pool.query(
+    `
+    INSERT INTO v2_question_reviews (
+      user_id,
+      question_id,
+      mistake_category,
+      review_status
+    )
+    VALUES (
+      $1,
+      $2,
+      $3,
+      $4
+    )
+    ON CONFLICT (user_id, question_id)
+    DO UPDATE SET
+      mistake_category = CASE
+        WHEN $5::boolean THEN EXCLUDED.mistake_category
+        ELSE v2_question_reviews.mistake_category
+      END,
+      review_status = CASE
+        WHEN $6::boolean THEN EXCLUDED.review_status
+        ELSE v2_question_reviews.review_status
+      END,
+      updated_at = CURRENT_TIMESTAMP
+    RETURNING *
+    `,
+    [
+      userId,
+      questionId,
+      mistakeCategory ?? null,
+      reviewStatus ?? "needs_review",
+      mistakeCategory !== undefined,
+      reviewStatus !== undefined
+    ]
+  );
+
+  return result.rows[0];
+};
+
+const getQuestionAnswerStatistics = async ({
+  questionId
+}) => {
+  const result = await pool.query(
+    `
+    SELECT
+      o.id AS option_id,
+      o.option_key,
+      o.option_text,
+      o.display_order,
+
+      COUNT(qa.id)::INTEGER AS answer_count
+
+    FROM v2_quiz_options o
+
+    LEFT JOIN v2_question_attempts qa
+      ON qa.question_id = o.question_id
+     AND qa.selected_option_id = o.id
+     AND qa.status = 'answered'
+     AND qa.is_correct IS NOT NULL
+
+    WHERE o.question_id = $1
+
+    GROUP BY
+      o.id,
+      o.option_key,
+      o.option_text,
+      o.display_order
+
+    ORDER BY o.display_order ASC
+    `,
+    [questionId]
+  );
+
+  if (!result.rows.length) {
+    const error = new Error("Question not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const totalAnswers = result.rows.reduce(
+    (sum, row) => sum + Number(row.answer_count),
+    0
+  );
+
+  return {
+    questionId,
+    totalAnswers,
+    options: result.rows.map((row) => ({
+      optionId: row.option_id,
+      optionKey: row.option_key,
+      optionText: row.option_text,
+      answerCount: Number(row.answer_count),
+      percentage:
+        totalAnswers > 0
+          ? Number(
+              (
+                Number(row.answer_count) /
+                totalAnswers *
+                100
+              ).toFixed(2)
+            )
+          : 0
+    }))
+  };
+};
+
+
+const SUPPORTED_ACTIONS = [
+  "why_is_my_answer_wrong",
+  "show_steps",
+  "explain_simpler",
+  "similar_question",
+];
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+
+const validateRequest = ({
+  questionId,
+  quizAttemptId,
+  action,
+}) => {
+  if (!UUID_REGEX.test(questionId || "")) {
+    const error = new Error("Invalid questionId");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (
+    quizAttemptId &&
+    !UUID_REGEX.test(quizAttemptId)
+  ) {
+    const error = new Error("Invalid quizAttemptId");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!SUPPORTED_ACTIONS.includes(action)) {
+    const error = new Error(
+      `Unsupported action. Allowed actions: ${SUPPORTED_ACTIONS.join(", ")}`
+    );
+
+    error.statusCode = 400;
+    throw error;
+  }
+};
+
+
+/**
+ * Fetch authoritative question context from PostgreSQL.
+ *
+ * Never trust frontend-supplied correct answers or selected answers.
+ * The authenticated user must own the question attempt.
+ */
+
+
+const getQuestionContext = async ({
+  userId,
+  questionId,
+  quizAttemptId,
+}) => {
+  const query = `
+    SELECT
+      q.id AS question_id,
+      q.question_text,
+      q.explanation,
+      q.topic_key,
+      q.correct_option_key,
+
+      qa.quiz_attempt_id,
+      qa.selected_option_id,
+      qa.is_correct,
+      qa.created_at AS attempt_created_at,
+
+      COALESCE(
+        json_agg(
+          json_build_object(
+            'optionId', o.id,
+            'optionKey', o.option_key,
+            'optionText', o.option_text
+          )
+          ORDER BY o.option_key
+        ) FILTER (WHERE o.id IS NOT NULL),
+        '[]'::json
+      ) AS options
+
+    FROM v2_quiz_questions q
+
+    JOIN v2_question_attempts qa
+      ON qa.question_id = q.id
+
+    LEFT JOIN v2_quiz_options o
+      ON o.question_id = q.id
+
+    WHERE q.id = $1::uuid
+      AND qa.user_id = $2::uuid
+      AND (
+        $3::uuid IS NULL
+        OR qa.quiz_attempt_id = $3::uuid
+      )
+
+    GROUP BY
+      q.id,
+      q.question_text,
+      q.explanation,
+      q.topic_key,
+      q.correct_option_key,
+      qa.quiz_attempt_id,
+      qa.selected_option_id,
+      qa.is_correct,
+      qa.created_at
+
+    ORDER BY qa.created_at DESC
+
+    LIMIT 1
+  `;
+
+  const result = await pool.query(query, [
+    questionId,
+    userId,
+    quizAttemptId || null,
+  ]);
+
+  if (result.rows.length === 0) {
+    const error = new Error(
+      "Question attempt not found for this user"
+    );
+
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const row = result.rows[0];
+
+  const options =
+    typeof row.options === "string"
+      ? JSON.parse(row.options)
+      : row.options;
+
+  const selectedOption = options.find(
+    (option) =>
+      String(option.optionId) ===
+      String(row.selected_option_id)
+  );
+
+  const correctOptionKey = row.correct_option_key
+    ? String(row.correct_option_key)
+    : "";
+
+  const correctOption = options.find(
+    (option) =>
+      String(option.optionKey) === correctOptionKey
+  );
+
+  return {
+    questionId: String(row.question_id),
+
+    topicId: row.topic_key
+      ? String(row.topic_key)
+      : null,
+
+    questionText: row.question_text,
+
+    explanation: row.explanation,
+
+    options,
+
+    selectedOptionId: selectedOption
+      ? String(selectedOption.optionId)
+      : null,
+
+    selectedAnswer: selectedOption
+      ? String(selectedOption.optionKey)
+      : null,
+
+    correctOptionKey,
+
+    correctAnswer: correctOptionKey,
+
+    mistakeCategory: null,
+
+    isCorrect: row.is_correct,
+
+    quizAttemptId: row.quiz_attempt_id
+      ? String(row.quiz_attempt_id)
+      : null,
+  };
+};
+
+
+
+
+
+const askAI = async ({
+  userId,
+  questionId = null,
+  quizAttemptId = null,
+  action,
+  userMessage = null,
+  conversationId = null,
+  conversationType = "ai_tutor",
+}) => {
+  const supportedActions = [
+    "why_is_my_answer_wrong",
+    "show_steps",
+    "explain_simpler",
+    "similar_question",
+    "ask_question",
+  ];
+
+  if (!supportedActions.includes(action)) {
+    const error = new Error("Unsupported AI Tutor action");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!["ai_tutor", "general_chatbot"].includes(conversationType)) {
+    const error = new Error("Invalid conversationType");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (
+    action === "ask_question" &&
+    (!userMessage || !userMessage.trim())
+  ) {
+    const error = new Error("userMessage is required for ask_question");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (conversationType === "ai_tutor" && !questionId) {
+    const error = new Error(
+      "questionId is required for an AI Tutor quiz conversation"
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (conversationType === "general_chatbot" && action !== "ask_question") {
+    const error = new Error(
+      "General chatbot currently supports ask_question only"
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  let questionContext = null;
+
+  if (conversationType === "ai_tutor") {
+    questionContext = await getQuestionContext({
+      userId,
+      questionId,
+      quizAttemptId,
+    });
+  }
+
+  const client = await pool.connect();
+
+  let resolvedConversationId;
+
+  try {
+    await client.query("BEGIN");
+
+    if (conversationId) {
+      const existing = await client.query(
+        `SELECT id, user_id, conversation_type, question_id, quiz_attempt_id
+         FROM v2_ai_tutor_conversations
+         WHERE id = $1::uuid
+           AND user_id = $2::uuid
+         FOR UPDATE`,
+        [conversationId, userId]
+      );
+
+      if (!existing.rows.length) {
+        const error = new Error("Conversation not found");
+        error.statusCode = 404;
+        throw error;
+      }
+
+      const conversation = existing.rows[0];
+
+      if (conversation.conversation_type !== conversationType) {
+        const error = new Error("Conversation type does not match");
+        error.statusCode = 400;
+        throw error;
+      }
+
+      if (
+        conversationType === "ai_tutor" &&
+        String(conversation.question_id) !== String(questionId)
+      ) {
+        const error = new Error(
+          "Conversation does not belong to this question"
+        );
+        error.statusCode = 400;
+        throw error;
+      }
+
+      resolvedConversationId = conversation.id;
+
+      await client.query(
+        `UPDATE v2_ai_tutor_conversations
+         SET updated_at = NOW()
+         WHERE id = $1::uuid`,
+        [resolvedConversationId]
+      );
+    } else {
+      const title =
+        userMessage?.trim().slice(0, 100) ||
+        questionContext?.questionText?.slice(0, 100) ||
+        "New conversation";
+
+      const created = await client.query(
+        `INSERT INTO v2_ai_tutor_conversations (
+           user_id,
+           conversation_type,
+           question_id,
+           quiz_attempt_id,
+           title
+         )
+         VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5)
+         RETURNING id`,
+        [
+          userId,
+          conversationType,
+          questionId,
+          quizAttemptId,
+          title,
+        ]
+      );
+
+      resolvedConversationId = created.rows[0].id;
+    }
+
+    // Store the student's custom message.
+    // Predefined actions do not require a user message.
+    if (userMessage?.trim()) {
+      await client.query(
+        `INSERT INTO v2_ai_tutor_messages (
+           user_id,
+           question_id,
+           quiz_attempt_id,
+           conversation_id,
+           role,
+           content,
+           action,
+           created_at
+         )
+         VALUES (
+           $1::uuid,
+           $2::uuid,
+           $3::uuid,
+           $4::uuid,
+           'user',
+           $5,
+           $6,
+           NOW()
+         )`,
+        [
+          userId,
+          questionId,
+          quizAttemptId,
+          resolvedConversationId,
+          userMessage.trim(),
+          action,
+        ]
+      );
+    }
+
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  // Load prior messages for this conversation.
+
+const historyResult = await pool.query(
+  `SELECT role, content
+   FROM (
+     SELECT id, role, content, created_at
+     FROM v2_ai_tutor_messages
+     WHERE conversation_id = $1::uuid
+       AND user_id = $2::uuid
+     ORDER BY created_at DESC, id DESC
+     LIMIT 50
+   ) recent_messages
+   ORDER BY created_at ASC, id ASC`,
+  [resolvedConversationId, userId]
+);
+
+const conversation = historyResult.rows;
+
+
+  console.log(
+    "AI Tutor request:",
+    JSON.stringify(
+      {
+        userId,
+        questionId,
+        action,
+        conversationId: resolvedConversationId,
+        conversationType,
+        questionContext,
+        conversation,
+        userMessage,
+      },
+      null,
+      2
+    )
+  );
+
+  const job = await aiTutorQueue.add(
+    "ai-tutor-response",
+    {
+      userId: String(userId),
+      questionId: questionId ? String(questionId) : null,
+      quizAttemptId: quizAttemptId ? String(quizAttemptId) : null,
+      conversationId: String(resolvedConversationId),
+      conversationType,
+      action,
+      userMessage: userMessage?.trim() || "",
+      questionContext,
+      conversation,
+    },
+    {
+      attempts: 3,
+      backoff: {
+        type: "exponential",
+        delay: 2000,
+      },
+      removeOnComplete: {
+        age: 3600,
+        count: 1000,
+      },
+      removeOnFail: {
+        age: 86400,
+      },
+    }
+  );
+
+  return {
+    jobId: String(job.id),
+    status: "queued",
+    questionId: questionId ? String(questionId) : null,
+    conversationId: String(resolvedConversationId),
+    conversationType,
+    action,
+  };
+};
+
+
+
+
+
+
+/**
+ * Retrieve the status and result of an existing AI Tutor job.
+ */
+const getJobStatus = async (jobId) => {
+  if (!jobId || typeof jobId !== "string") {
+    const error = new Error("Invalid jobId");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const job = await aiTutorQueue.getJob(jobId);
+
+  if (!job) {
+    const error = new Error(
+      "AI Tutor job not found. It may have expired or been removed."
+    );
+
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const state = await job.getState();
+
+  const response = {
+    jobId: String(job.id),
+    name: job.name,
+    status: state,
+    questionId: job.data.questionId,
+    action: job.data.action,
+  };
+
+  if (state === "completed") {
+    response.result = job.returnvalue;
+  }
+
+  if (state === "failed") {
+    response.error = job.failedReason;
+  }
+
+  if (state === "active" || state === "waiting") {
+    response.progress = job.progress;
+  }
+
+  return response;
+};
+
+
 
 module.exports = {
   createQuiz,
@@ -1825,6 +2627,11 @@ module.exports = {
     answerQuestion,
     completeStage,
     retryStageAttempt,
-    completeQuiz
-
+    completeQuiz,
+    getReviewSession,
+    updateQuestionReview,
+    getQuestionAnswerStatistics,
+    askAI,
+    getJobStatus,
+    getQuestionContext,
 };

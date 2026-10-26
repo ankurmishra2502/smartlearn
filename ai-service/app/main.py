@@ -2,6 +2,7 @@ from fastapi import FastAPI
 
 from app.api.routes import router
 from app.api.quiz_routes import router as quiz_router
+from app.api.ai_tutor_routes import router as ai_tutor_router
 from app.core.config import settings
 
 
@@ -15,6 +16,9 @@ app.include_router(router)
 
 # V2 Quiz AI routes
 app.include_router(quiz_router)
+
+# AI Tutor routes
+app.include_router(ai_tutor_router)
 
 
 @app.get("/health")

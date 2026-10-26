@@ -8,6 +8,12 @@ const authMiddleware = require("../../middleware/v2/authMiddleware");
 
 const router = express.Router();
 
+router.get(
+  "/ai-history",
+  authMiddleware,
+  quizController.getAIConversationHistoryHandler
+);
+
 router.post(
   "/",
   authMiddleware,
@@ -103,6 +109,38 @@ router.post(
   authMiddleware,
   quizController.completeQuiz
 );
+
+router.get(
+  "/review/attempts/:quizAttemptId",
+  authMiddleware,
+  quizController.getReviewSession
+);
+
+router.patch(
+  "/review/questions/:questionId",
+  authMiddleware,
+  quizController.updateQuestionReview
+);
+
+router.get(
+  "/review/questions/:questionId/statistics",
+  authMiddleware,
+  quizController.getQuestionAnswerStatistics
+);
+
+
+router.post(
+  "/ask",
+  authMiddleware,
+  quizController.askAI
+);
+
+router.get(
+  "/jobs/:jobId",
+  authMiddleware,
+  quizController.getJobStatus
+);
+
 
 
 module.exports = router;

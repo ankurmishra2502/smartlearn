@@ -1,5 +1,8 @@
 const quizService = require("../../services/v2/quizService");
 const quizGenerationQueue = require("../../queues/quizGenerationQueue");
+const aiTutorService = require("../../queues/aiTutorQueue");
+const pool = require("../../config/db");
+
 const createQuiz = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -693,6 +696,251 @@ const completeQuiz = async (req, res) => {
   }
 };
 
+const getReviewSession = async (req, res) => {
+  try {
+    const { quizAttemptId } = req.params;
+    const userId = req.user.id;
+
+    const data = await quizService.getReviewSession({
+      quizAttemptId,
+      userId
+    });
+
+    return res.status(200).json({
+      success: true,
+      data
+    });
+  } catch (error) {
+    console.error("Get review session error:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to get review session"
+    });
+  }
+};
+
+const updateQuestionReview = async (req, res) => {
+  try {
+    const { questionId } = req.params;
+    const userId = req.user.id;
+
+    const data = await quizService.updateQuestionReview({
+      questionId,
+      userId,
+      mistakeCategory: req.body.mistakeCategory,
+      reviewStatus: req.body.reviewStatus
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Review updated successfully",
+      data
+    });
+  } catch (error) {
+    console.error("Update question review error:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to update review"
+    });
+  }
+};
+
+const getQuestionAnswerStatistics = async (req, res) => {
+  try {
+    const { questionId } = req.params;
+
+    const data =
+      await quizService.getQuestionAnswerStatistics({
+        questionId
+      });
+
+    return res.status(200).json({
+      success: true,
+      data
+    });
+  } catch (error) {
+    console.error("Get answer statistics error:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message:
+        error.message || "Failed to get answer statistics"
+    });
+  }
+};
+
+const askAI = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const {
+      questionId = null,
+      quizAttemptId = null,
+      action,
+      userMessage = null,
+      conversationId = null,
+      conversationType = "ai_tutor",
+    } = req.body;
+
+    if (!action) {
+      return res.status(400).json({
+        success: false,
+        message: "action is required",
+      });
+    }
+
+    if (action === "ask_question" && !userMessage?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "userMessage is required for ask_question",
+      });
+    }
+
+    if (conversationType === "ai_tutor" && !questionId) {
+      return res.status(400).json({
+        success: false,
+        message: "questionId is required for AI Tutor",
+      });
+    }
+
+    if (
+      conversationType === "general_chatbot" &&
+      action !== "ask_question"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "general_chatbot only supports ask_question",
+      });
+    }
+
+    const result = await quizService.askAI({
+      userId,
+      questionId,
+      quizAttemptId,
+      action,
+      userMessage,
+      conversationId,
+      conversationType,
+    });
+
+    return res.status(202).json({
+      success: true,
+      message: "AI request queued successfully",
+      data: result,
+    });
+  } catch (error) {
+    console.error("AI Tutor request error:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode
+        ? error.message
+        : "Failed to queue AI request",
+    });
+  }
+};
+
+
+const getJobStatus = async (req, res) => {
+  try {
+    const { jobId } = req.params;
+
+    const result = await quizService.getJobStatus(jobId);
+
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    console.error("AI Tutor job status error:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message:
+        error.statusCode
+          ? error.message
+          : "Failed to retrieve AI Tutor job status",
+    });
+  }
+};
+
+
+
+const getAIConversationHistory = async ({ userId, conversationId }) => {
+  const conversationResult = await pool.query(
+    `SELECT *
+     FROM v2_ai_tutor_conversations
+     WHERE id = $1
+       AND user_id = $2`,
+    [conversationId, userId]
+  );
+
+  if (conversationResult.rows.length === 0) {
+    return {
+      conversation: null,
+      messages: [],
+    };
+  }
+
+  const conversation = conversationResult.rows[0];
+
+  const messagesResult = await pool.query(
+    `SELECT *
+     FROM v2_ai_tutor_messages
+     WHERE conversation_id = $1
+       AND user_id = $2
+     ORDER BY created_at ASC, id ASC`,
+    [conversationId, userId]
+  );
+
+  return {
+    conversation,
+    messages: messagesResult.rows,
+  };
+};
+
+const getAIConversationHistoryHandler = async (req, res) => {
+  try {
+    const { conversationId } = req.query;
+    const userId = req.user.id;
+
+    if (!conversationId) {
+      return res.status(400).json({
+        success: false,
+        message: "conversationId is required",
+      });
+    }
+
+    const result = await getAIConversationHistory({
+      userId,
+      conversationId,
+    });
+
+    if (!result.conversation) {
+      return res.status(404).json({
+        success: false,
+        message: "Conversation not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    console.error("Get AI conversation history error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch conversation history",
+    });
+  }
+};
+
+
+
 
 module.exports = {
   createQuiz,
@@ -710,5 +958,11 @@ module.exports = {
     answerQuestion,
     completeStage,
     retryStage,
-    completeQuiz
+    completeQuiz,
+    getReviewSession,
+    updateQuestionReview,
+    getQuestionAnswerStatistics,
+    askAI,
+    getJobStatus,
+    getAIConversationHistoryHandler
 };
