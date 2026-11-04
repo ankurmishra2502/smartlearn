@@ -1,0 +1,48 @@
+{
+  "success": true,
+  "data": {
+    "goal": {
+      "id": "7f355b41-749b-448a-a04d-ec44ef803b72",
+      "name": "Olympiad / Competitive"
+    },
+    "title": "Olympiad / Competitive learners",
+    "subtitle": "Ranked by points earned. Updated every hour.",
+    "totalLearners": 1,
+    "limit": 20,
+    "offset": 0,
+    "hasMore": false,
+    "search": "",
+    "sortedBy": "points",
+    "me": {
+      "rank": 1,
+      "isTop3": true,
+      "userId": "185cedf4-31ed-4c5f-92b3-5303a3e1362f",
+      "name": "Ankur Mishra",
+      "displayName": "Ankur Mishra",
+      "initials": "AM",
+      "profilePicture": "https://lh3.googleusercontent.com/a/ACg8ocIjaV9IsgpDX8AIsfVg6dFlIVAKLRSP49QCxz7F0Ofsq3Oe8E1F=s96-c",
+      "level": 1,
+      "levelTitle": "Rookie",
+      "goalName": "Olympiad / Competitive",
+      "city": "New Delhi",
+      "subtitle": "Olympiad / Competitive · New Delhi",
+      "points": 150,
+      "questionsAnswered": 79,
+      "correctAnswers": 55,
+      "streakDays": 0,
+      "accuracyPercent": 70,
+      "avgTimePerQuestionSeconds": 0,
+      "avgTimePerQuestionMinutes": 0,
+      "isMe": true
+    },
+    "learners": [],
+    "myRankSummary": {
+      "rank": 1,
+      "rankChangeThisWeek": 0,
+      "pointsThisWeek": 0,
+      "pointsToNextRank": null,
+      "percentile": 0
+    },
+    "youAreAheadOf": 0
+  }
+}
