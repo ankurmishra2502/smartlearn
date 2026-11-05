@@ -231,7 +231,10 @@ Task:
     try:
         response = get_llm().invoke(messages)
         response_text = response.content
-
+        logger.info("AI Tutor response type: %s", type(response).__name__)
+        logger.info("AI Tutor response content: %r", response_text)
+        if not response_text or not str(response_text).strip():
+            raise ValueError("LLM returned an empty response for AI Tutor")
         if isinstance(response_text, list):
             response_text = "\n".join(
                 item.get("text", "")
