@@ -21,6 +21,30 @@ router.post(
 );
 
 router.get(
+  "/mistake-bank",
+  authMiddleware,
+  quizController.getMistakeBank
+);
+
+router.post(
+  "/mistake-bank/practice/generate",
+  authMiddleware,
+  quizController.generateMistakePracticeQuestion
+);
+
+router.get(
+  "/mistake-bank/practice/:practiceAttemptId",
+  authMiddleware,
+  quizController.getMistakePracticeQuestion
+);
+
+router.post(
+  "/mistake-bank/practice/:practiceAttemptId/answer",
+  authMiddleware,
+  quizController.submitMistakePracticeAnswer
+);
+
+router.get(
   "/:quizId",
   authMiddleware,
   quizController.getQuiz

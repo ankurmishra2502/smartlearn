@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from app.api.routes import router
 from app.api.quiz_routes import router as quiz_router
 from app.api.ai_tutor_routes import router as ai_tutor_router
+from app.api.practice_generation_routes import router as practice_router
 from app.core.config import settings
 
 
@@ -20,6 +21,8 @@ app.include_router(quiz_router)
 # AI Tutor routes
 app.include_router(ai_tutor_router)
 
+# Practice Question Generation routes
+app.include_router(practice_router)
 
 @app.get("/health")
 async def health():

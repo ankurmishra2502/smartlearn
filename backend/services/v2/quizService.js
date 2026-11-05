@@ -2609,6 +2609,601 @@ const getJobStatus = async (jobId) => {
   return response;
 };
 
+const getMistakeBank = async ({
+  userId,
+  topicKey,
+  topicName,
+  status,
+}) => {
+  const normalizedStatus = status
+    ? String(status).trim().toLowerCase()
+    : null;
+
+  const statusMap = {
+    open: "needs_review",
+    fixing: "practice_again",
+    fixed: "understood",
+  };
+
+  if (normalizedStatus && !statusMap[normalizedStatus]) {
+    const error = new Error(
+      "Invalid status. Allowed values: open, fixing, fixed."
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const params = [userId];
+  const filters = [];
+
+  if (topicKey) {
+    params.push(topicKey);
+    filters.push(`q.topic_key = $${params.length}`);
+  }
+
+  if (topicName) {
+    params.push(topicName);
+    filters.push(`q.topic_name = $${params.length}`);
+  }
+
+  const topicFilter = filters.length
+    ? `AND ${filters.join(" AND ")}`
+    : "";
+
+  const listParams = [...params];
+  let statusFilter = "";
+
+  if (normalizedStatus) {
+    listParams.push(statusMap[normalizedStatus]);
+
+    statusFilter = `
+      AND md.review_status = $${listParams.length}
+    `;
+  }
+
+  const query = `
+    WITH question_attempt_stats AS (
+      SELECT
+        qa.question_id,
+
+        COUNT(*)::INTEGER AS total_attempt_count,
+
+        COUNT(*) FILTER (
+          WHERE qa.is_correct IS FALSE
+        )::INTEGER AS incorrect_attempt_count,
+
+        MAX(qa.answered_at) FILTER (
+          WHERE qa.is_correct IS FALSE
+        ) AS latest_incorrect_at
+
+      FROM v2_question_attempts AS qa
+
+      INNER JOIN v2_quiz_questions AS q
+        ON q.id = qa.question_id
+
+      WHERE qa.user_id = $1::uuid
+        AND qa.status = 'answered'
+        ${topicFilter}
+
+      GROUP BY qa.question_id
+
+      HAVING COUNT(*) FILTER (
+        WHERE qa.is_correct IS FALSE
+      ) > 0
+    ),
+
+    latest_incorrect_attempt AS (
+      SELECT DISTINCT ON (qa.question_id)
+        qa.question_id,
+        qa.quiz_attempt_id,
+        qa.selected_option_id,
+        qa.answered_at
+
+      FROM v2_question_attempts AS qa
+
+      INNER JOIN question_attempt_stats AS stats
+        ON stats.question_id = qa.question_id
+
+      WHERE qa.user_id = $1::uuid
+        AND qa.status = 'answered'
+        AND qa.is_correct IS FALSE
+
+      ORDER BY
+        qa.question_id,
+        qa.answered_at DESC NULLS LAST,
+        qa.created_at DESC
+    ),
+
+    mistake_details AS (
+      SELECT
+        stats.question_id,
+        stats.total_attempt_count,
+        stats.incorrect_attempt_count,
+        stats.latest_incorrect_at,
+
+        lia.quiz_attempt_id,
+        lia.selected_option_id,
+
+        q.question_text,
+        q.question_type,
+        q.topic_name,
+        q.topic_key,
+        q.subtopic_name,
+        q.subtopic_key,
+        q.explanation,
+
+        selected_option.option_key AS selected_option_key,
+        selected_option.option_text AS selected_option_text,
+
+        correct_option.option_key AS resolved_correct_option_key,
+        correct_option.option_text AS correct_option_text,
+
+        qr.mistake_category,
+
+        COALESCE(
+          qr.review_status,
+          'needs_review'
+        ) AS review_status
+
+      FROM question_attempt_stats AS stats
+
+      INNER JOIN v2_quiz_questions AS q
+        ON q.id = stats.question_id
+
+      INNER JOIN latest_incorrect_attempt AS lia
+        ON lia.question_id = stats.question_id
+
+      LEFT JOIN v2_quiz_options AS selected_option
+        ON selected_option.id = lia.selected_option_id
+       AND selected_option.question_id = q.id
+
+      LEFT JOIN v2_quiz_options AS correct_option
+        ON correct_option.question_id = q.id
+       AND correct_option.option_key = q.correct_option_key
+
+      LEFT JOIN v2_question_reviews AS qr
+        ON qr.question_id = q.id
+       AND qr.user_id = $1::uuid
+    )
+
+    SELECT
+      (
+        SELECT COUNT(*)::INTEGER
+        FROM mistake_details
+      ) AS total_mistakes,
+
+      (
+        SELECT COUNT(*)::INTEGER
+        FROM mistake_details
+        WHERE review_status = 'needs_review'
+      ) AS open_count,
+
+      (
+        SELECT COUNT(*)::INTEGER
+        FROM mistake_details
+        WHERE review_status = 'practice_again'
+      ) AS fixing_count,
+
+      (
+        SELECT COUNT(*)::INTEGER
+        FROM mistake_details
+        WHERE review_status = 'understood'
+      ) AS fixed_count,
+
+      COALESCE(
+        (
+          SELECT jsonb_agg(
+            jsonb_build_object(
+
+              'questionId',
+              md.question_id,
+
+              'questionText',
+              md.question_text,
+
+              'questionType',
+              md.question_type,
+
+              'topicName',
+              md.topic_name,
+
+              'topicKey',
+              md.topic_key,
+
+              'subtopicName',
+              md.subtopic_name,
+
+              'subtopicKey',
+              md.subtopic_key,
+
+              'selectedOptionKey',
+              md.selected_option_key,
+
+              'selectedAnswer',
+              md.selected_option_text,
+
+              'correctOptionKey',
+              md.resolved_correct_option_key,
+
+              'correctAnswer',
+              md.correct_option_text,
+
+              'options',
+              (
+                SELECT COALESCE(
+                  jsonb_agg(
+                    jsonb_build_object(
+                      'optionId',
+                      opt.id,
+
+                      'optionKey',
+                      opt.option_key,
+
+                      'optionText',
+                      opt.option_text,
+
+                      'isCorrect',
+                      (
+                        opt.option_key =
+                        md.resolved_correct_option_key
+                      ),
+
+                      'isSelected',
+                      (
+                        opt.id =
+                        md.selected_option_id
+                      )
+                    )
+                    ORDER BY opt.display_order
+                  ),
+                  '[]'::jsonb
+                )
+                FROM v2_quiz_options AS opt
+                WHERE opt.question_id = md.question_id
+              ),
+
+              'quizAttemptId',
+              md.quiz_attempt_id,
+
+              'explanation',
+              md.explanation,
+
+              'mistakeCategory',
+              md.mistake_category,
+
+              'reviewStatus',
+              md.review_status,
+
+              'status',
+              CASE md.review_status
+                WHEN 'understood' THEN 'fixed'
+                WHEN 'practice_again' THEN 'fixing'
+                ELSE 'open'
+              END,
+
+              'tries',
+              md.total_attempt_count,
+
+              'incorrectAttemptCount',
+              md.incorrect_attempt_count,
+
+              'latestIncorrectAt',
+              md.latest_incorrect_at
+
+            )
+            ORDER BY md.latest_incorrect_at DESC NULLS LAST
+          )
+
+          FROM mistake_details AS md
+
+          WHERE TRUE
+            ${statusFilter}
+        ),
+        '[]'::jsonb
+      ) AS mistakes
+  `;
+
+  const result = await pool.query(query, listParams);
+
+  const row = result.rows[0];
+
+  return {
+    summary: {
+      total: row.total_mistakes,
+      open: row.open_count,
+      fixing: row.fixing_count,
+      fixed: row.fixed_count,
+    },
+    mistakes: row.mistakes,
+  };
+};
+
+
+
+/**
+ * Start AI-generated practice question for a mistake.
+ */
+const generateMistakePracticeQuestion = async ({
+  userId,
+  questionId,
+}) => {
+  if (!userId || !questionId) {
+    const error = new Error("userId and questionId are required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // Verify that this question was answered incorrectly by this user.
+  const questionResult = await pool.query(
+    `
+    SELECT
+      q.id,
+      q.question_text,
+      q.question_type,
+      q.topic_name,
+      q.topic_key,
+      q.subtopic_name,
+      q.subtopic_key,
+      q.explanation,
+      q.correct_option_key,
+      COALESCE(
+        jsonb_agg(
+          jsonb_build_object(
+            'optionKey', o.option_key,
+            'optionText', o.option_text
+          )
+          ORDER BY o.display_order
+        ) FILTER (WHERE o.id IS NOT NULL),
+        '[]'::jsonb
+      ) AS options
+    FROM v2_quiz_questions q
+    INNER JOIN v2_question_attempts qa
+      ON qa.question_id = q.id
+    LEFT JOIN v2_quiz_options o
+      ON o.question_id = q.id
+    WHERE q.id = $1::uuid
+      AND qa.user_id = $2::uuid
+      AND qa.status = 'answered'
+      AND qa.is_correct IS FALSE
+    GROUP BY q.id
+    LIMIT 1
+    `,
+    [questionId, userId]
+  );
+
+  if (!questionResult.rows.length) {
+    const error = new Error(
+      "Mistake question not found for this user"
+    );
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const question = questionResult.rows[0];
+
+  // Prepare the context for the Python practice-generation service.
+  const questionContext = {
+    questionText: question.question_text,
+    questionType: question.question_type,
+    options: question.options,
+    correctOptionKey: question.correct_option_key,
+    explanation: question.explanation,
+    topicName: question.topic_name,
+    topicKey: question.topic_key,
+    subtopicName: question.subtopic_name,
+    subtopicKey: question.subtopic_key,
+  };
+
+  // Enqueue the generation job.
+  const job = await aiTutorQueue.add(
+    "generate-practice-question",
+    {
+      userId: String(userId),
+      questionId: String(questionId),
+      questionContext,
+    },
+    {
+      attempts: 3,
+      backoff: {
+        type: "exponential",
+        delay: 2000,
+      },
+      removeOnComplete: {
+        age: 3600,
+        count: 1000,
+      },
+      removeOnFail: {
+        age: 86400,
+      },
+    }
+  );
+
+  return {
+    jobId: String(job.id),
+    questionId: String(questionId),
+    status: "queued",
+  };
+};
+
+/**
+ * Get a generated practice question without exposing its answer.
+ */
+const getMistakePracticeQuestion = async ({
+  userId,
+  practiceAttemptId,
+}) => {
+  const result = await pool.query(
+    `
+    SELECT
+      id,
+      original_question_id,
+      generated_question,
+      is_correct,
+      created_at,
+      answered_at
+    FROM v2_mistake_practice_attempts
+    WHERE id = $1::uuid
+      AND user_id = $2::uuid
+    LIMIT 1
+    `,
+    [practiceAttemptId, userId]
+  );
+
+  if (!result.rows.length) {
+    const error = new Error("Practice question not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const attempt = result.rows[0];
+
+  if (attempt.answered_at) {
+    const error = new Error("This practice question has already been answered");
+    error.statusCode = 409;
+    throw error;
+  }
+
+  const question = attempt.generated_question;
+
+  // Never expose the correct answer or explanation before submission.
+  return {
+    practiceAttemptId: attempt.id,
+    originalQuestionId: attempt.original_question_id,
+    question: {
+      questionText: question.questionText,
+      options: question.options,
+      topicName: question.topicName,
+    },
+    createdAt: attempt.created_at,
+  };
+};
+
+/**
+ * Submit and evaluate a generated practice question.
+ */
+const submitMistakePracticeAnswer = async ({
+  userId,
+  practiceAttemptId,
+  selectedOptionKey,
+}) => {
+  if (!selectedOptionKey) {
+    const error = new Error("selectedOptionKey is required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const attemptResult = await client.query(
+      `
+      SELECT
+        id,
+        original_question_id,
+        generated_question,
+        answered_at
+      FROM v2_mistake_practice_attempts
+      WHERE id = $1::uuid
+        AND user_id = $2::uuid
+      FOR UPDATE
+      `,
+      [practiceAttemptId, userId]
+    );
+
+    if (!attemptResult.rows.length) {
+      const error = new Error("Practice question not found");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const attempt = attemptResult.rows[0];
+
+    if (attempt.answered_at) {
+      const error = new Error("This practice question has already been answered");
+      error.statusCode = 409;
+      throw error;
+    }
+
+    const generatedQuestion = attempt.generated_question;
+
+    const validOption = generatedQuestion.options.some(
+      option => option.optionKey === selectedOptionKey
+    );
+
+    if (!validOption) {
+      const error = new Error("Invalid option selected");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const isCorrect =
+      generatedQuestion.correctOptionKey === selectedOptionKey;
+
+    await client.query(
+      `
+      UPDATE v2_mistake_practice_attempts
+      SET
+        selected_option_key = $1,
+        is_correct = $2,
+        answered_at = NOW()
+      WHERE id = $3::uuid
+        AND user_id = $4::uuid
+      `,
+      [
+        selectedOptionKey,
+        isCorrect,
+        practiceAttemptId,
+        userId,
+      ]
+    );
+
+    const reviewStatus = isCorrect
+      ? "understood"
+      : "practice_again";
+
+    await client.query(
+      `
+      INSERT INTO v2_question_reviews (
+        user_id,
+        question_id,
+        review_status
+      )
+      VALUES ($1::uuid, $2::uuid, $3)
+      ON CONFLICT (user_id, question_id)
+      DO UPDATE SET
+        review_status = EXCLUDED.review_status,
+        updated_at = NOW()
+      `,
+      [
+        userId,
+        attempt.original_question_id,
+        reviewStatus,
+      ]
+    );
+
+    await client.query("COMMIT");
+
+    return {
+      practiceAttemptId,
+      originalQuestionId: attempt.original_question_id,
+      selectedOptionKey,
+      isCorrect,
+      correctOptionKey: generatedQuestion.correctOptionKey,
+      explanation: generatedQuestion.explanation,
+      reviewStatus,
+      mistakeStatus: isCorrect ? "fixed" : "fixing",
+    };
+
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
 
 
 module.exports = {
@@ -2634,4 +3229,8 @@ module.exports = {
     askAI,
     getJobStatus,
     getQuestionContext,
+    getMistakeBank,
+    generateMistakePracticeQuestion,
+    getMistakePracticeQuestion,
+    submitMistakePracticeAnswer,
 };

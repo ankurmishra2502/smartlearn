@@ -696,6 +696,35 @@ const completeQuiz = async (req, res) => {
   }
 };
 
+
+const getMistakeBank = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const { topicKey, topicName, status } = req.query;
+
+    const data = await quizService.getMistakeBank({
+      userId,
+      topicKey,
+      topicName,
+      status,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    console.error("Get Mistake Bank error:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to get Mistake Bank",
+    });
+  }
+};
+
+
 const getReviewSession = async (req, res) => {
   try {
     const { quizAttemptId } = req.params;
@@ -939,7 +968,87 @@ const getAIConversationHistoryHandler = async (req, res) => {
   }
 };
 
+/**
+ * Generate an AI practice question for a mistake.
+ */
+const generateMistakePracticeQuestion = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { questionId } = req.body;
 
+    if (!questionId) {
+      return res.status(400).json({
+        success: false,
+        message: "questionId is required",
+      });
+    }
+
+    const result = await quizService.generateMistakePracticeQuestion({
+      userId,
+      questionId,
+    });
+
+    return res.status(202).json({
+      success: true,
+      message: "Practice question generation started",
+      data: result,
+    });
+  } catch (error) {
+    console.error("Generate mistake practice question error:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to start practice question generation",
+    });
+  }
+};
+
+const getMistakePracticeQuestion = async (req, res) => {
+  try {
+    const { practiceAttemptId } = req.params;
+
+    const result = await quizService.getMistakePracticeQuestion({
+      userId: req.user.id,
+      practiceAttemptId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+
+const submitMistakePracticeAnswer = async (req, res) => {
+  try {
+    const { practiceAttemptId } = req.params;
+    const { selectedOptionKey } = req.body;
+
+    const result = await quizService.submitMistakePracticeAnswer({
+      userId: req.user.id,
+      practiceAttemptId,
+      selectedOptionKey,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
 
 
 module.exports = {
@@ -964,5 +1073,9 @@ module.exports = {
     getQuestionAnswerStatistics,
     askAI,
     getJobStatus,
-    getAIConversationHistoryHandler
+    getAIConversationHistoryHandler,
+    getMistakeBank,
+    generateMistakePracticeQuestion,
+    getMistakePracticeQuestion,
+    submitMistakePracticeAnswer,
 };
