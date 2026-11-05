@@ -2996,12 +2996,14 @@ const generateMistakePracticeQuestion = async ({
 
   // Enqueue the generation job.
   const job = await aiTutorQueue.add(
-    "generate-practice-question",
-    {
-      userId: String(userId),
-      questionId: String(questionId),
-      questionContext,
-    },
+     "generate-practice-question",
+  {
+    userId: String(userId),
+    questionId: String(questionId),
+    action: "similar_question",
+    conversationType: "ai_tutor",
+    questionContext,
+  },
     {
       attempts: 3,
       backoff: {
