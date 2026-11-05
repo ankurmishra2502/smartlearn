@@ -1,6 +1,7 @@
 import json
 import logging
 from typing import Any, Dict, List, TypedDict
+from urllib import response
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
@@ -231,8 +232,9 @@ Task:
     try:
         response = get_llm().invoke(messages)
         response_text = response.content
-        logger.info("AI Tutor response type: %s", type(response).__name__)
-        logger.info("AI Tutor response content: %r", response_text)
+        print("DEBUG RESPONSE OBJECT:", repr(response), flush=True)
+        print("DEBUG RESPONSE TYPE:", type(response).__name__, flush=True)
+        print("DEBUG RESPONSE CONTENT:", repr(response_text), flush=True)
         if not response_text or not str(response_text).strip():
             raise ValueError("LLM returned an empty response for AI Tutor")
         if isinstance(response_text, list):
