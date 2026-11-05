@@ -33,6 +33,7 @@ const paymentRoutes = require("./routes/paymentRoutes");
 const v2AuthRoutes = require("./routes/v2/authRoutes");
 const v2OnboardingRoutes = require("./routes/v2/onboardingRoutes");
 const v2QuizRoutes = require("./routes/v2/quizRoutes");
+const v2ProgressRoutes = require("./routes/v2/progressRoutes");
 
 
 
@@ -110,6 +111,7 @@ app.use("/payment", paymentRoutes);
 app.use("/api/v2/auth", v2AuthRoutes);
 app.use("/api/v2/onboarding", v2OnboardingRoutes);
 app.use("/api/v2/quizzes", v2QuizRoutes);
+app.use("/api/v2/progress", v2ProgressRoutes);
 
 
 

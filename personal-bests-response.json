@@ -1,0 +1,119 @@
+{
+  "success": true,
+  "data": {
+    "totals": {
+      "quizzesCompleted": 1,
+      "questionsAnswered": 79,
+      "correctAnswers": 55,
+      "overallAccuracyPercent": 70,
+      "avgTimePerQuestionSeconds": 0,
+      "activeDays": 2
+    },
+    "bestScore": {
+      "correct": 6,
+      "total": 15
+    },
+    "fastestQuizSeconds": null,
+    "bestAccuracyPercent": 40,
+    "longestStreakDays": 1,
+    "currentStreakDays": 0,
+    "recordsByTopic": [
+      {
+        "topic": "DSA - Graph Algorith",
+        "bestCorrect": 6,
+        "total": 15,
+        "attempts": 1
+      }
+    ],
+    "whereYouAre": [
+      {
+        "rank": 6,
+        "isTop3": false,
+        "userId": "7cb92d62-1b57-4eaf-b933-203c4ca336d6",
+        "name": "Meera Nair",
+        "displayName": "Meera Nair",
+        "initials": "MN",
+        "profilePicture": null,
+        "level": 2,
+        "levelTitle": "Rookie",
+        "goalName": "Olympiad / Competitive",
+        "city": "Kochi",
+        "subtitle": "Olympiad / Competitive · Kochi",
+        "points": 640,
+        "questionsAnswered": 15,
+        "correctAnswers": 8,
+        "streakDays": 3,
+        "accuracyPercent": 53,
+        "avgTimePerQuestionSeconds": 70,
+        "avgTimePerQuestionMinutes": 1,
+        "isMe": false
+      },
+      {
+        "rank": 7,
+        "isTop3": false,
+        "userId": "6be3d7f9-b9d3-4845-94fa-95db8797553c",
+        "name": "Diya Joshi",
+        "displayName": "Diya Joshi",
+        "initials": "DJ",
+        "profilePicture": null,
+        "level": 2,
+        "levelTitle": "Rookie",
+        "goalName": "NEET Preparation",
+        "city": "Mumbai",
+        "subtitle": "NEET Preparation · Mumbai",
+        "points": 520,
+        "questionsAnswered": 15,
+        "correctAnswers": 9,
+        "streakDays": 4,
+        "accuracyPercent": 60,
+        "avgTimePerQuestionSeconds": 60,
+        "avgTimePerQuestionMinutes": 1,
+        "isMe": false
+      },
+      {
+        "rank": 8,
+        "isTop3": false,
+        "userId": "185cedf4-31ed-4c5f-92b3-5303a3e1362f",
+        "name": "Ankur Mishra",
+        "displayName": "Ankur Mishra",
+        "initials": "AM",
+        "profilePicture": "https://lh3.googleusercontent.com/a/ACg8ocIjaV9IsgpDX8AIsfVg6dFlIVAKLRSP49QCxz7F0Ofsq3Oe8E1F=s96-c",
+        "level": 1,
+        "levelTitle": "Rookie",
+        "goalName": "Olympiad / Competitive",
+        "city": "New Delhi",
+        "subtitle": "Olympiad / Competitive · New Delhi",
+        "points": 150,
+        "questionsAnswered": 79,
+        "correctAnswers": 55,
+        "streakDays": 0,
+        "accuracyPercent": 70,
+        "avgTimePerQuestionSeconds": 0,
+        "avgTimePerQuestionMinutes": 0,
+        "isMe": true
+      },
+      {
+        "rank": 9,
+        "isTop3": false,
+        "userId": "ff80aa09-ddc9-46f3-b200-c23b4c0e9f37",
+        "name": "Aditya Rao",
+        "displayName": "Aditya Rao",
+        "initials": "AR",
+        "profilePicture": null,
+        "level": 1,
+        "levelTitle": "Rookie",
+        "goalName": "Olympiad / Competitive",
+        "city": "Hyderabad",
+        "subtitle": "Olympiad / Competitive · Hyderabad",
+        "points": 90,
+        "questionsAnswered": 15,
+        "correctAnswers": 5,
+        "streakDays": 1,
+        "accuracyPercent": 33,
+        "avgTimePerQuestionSeconds": 85,
+        "avgTimePerQuestionMinutes": 1,
+        "isMe": false
+      }
+    ]
+  }
+}
